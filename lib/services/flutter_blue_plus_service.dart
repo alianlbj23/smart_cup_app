@@ -75,6 +75,11 @@ class FlutterBluePlusService implements BleService {
     final sub = FlutterBluePlus.onScanResults.listen((results) {
       if (gen != _scanGen) return;
       for (final r in results) {
+        // 部分 Android 機型的硬體 Service 過濾器會漏放無關裝置,需再自行確認。
+        if (deviceId == null &&
+            !r.advertisementData.serviceUuids.contains(_service)) {
+          continue;
+        }
         final info = _toInfo(r);
         found[info.deviceId] = info;
       }
