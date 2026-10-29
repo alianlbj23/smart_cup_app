@@ -14,7 +14,8 @@ class CupReading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final water = manager.latestWater;
-    final stale = manager.isWaterStale(now);
+    final connected = manager.state == CupConnectionState.ready;
+    final stale = !connected || manager.isWaterStale(now);
     final color = water == null || stale ? AppColors.muted : AppColors.teal;
     final updatedAt = manager.latestWaterAt;
     final pose = manager.latestPose;
@@ -52,12 +53,16 @@ class CupReading extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                water == null
-                    ? '尚未收到水量'
-                    : stale
-                        ? '資料過期 · 更新於 ${fmtTime(updatedAt!)}'
-                        : 'fill25 ${water.fill25} · 刻度 ${water.level} · '
-                            '更新於 ${fmtTime(updatedAt!)}',
+                !connected
+                    ? (water == null
+                        ? '水杯未連線'
+                        : '水杯未連線 · 最後更新 ${fmtTime(updatedAt!)}')
+                    : water == null
+                        ? '已連線,等待第一筆水量…'
+                        : stale
+                            ? '資料過期 · 更新於 ${fmtTime(updatedAt!)}'
+                            : 'fill25 ${water.fill25} · 刻度 ${water.level} · '
+                                '更新於 ${fmtTime(updatedAt!)}',
                 style: mutedSmall.copyWith(
                     color: stale && water != null ? AppColors.orange : null),
               ),

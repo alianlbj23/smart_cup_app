@@ -18,10 +18,9 @@ class CupPage extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       children: [
         _connectionPanel(context),
-        if (manager.state == CupConnectionState.ready) ...[
-          const SizedBox(height: 12),
-          Panel(child: CupReading(manager: manager, now: now)),
-        ],
+        const SizedBox(height: 12),
+        // 水位圖永遠顯示;未連線或資料過期時以灰色呈現。
+        Panel(child: CupReading(manager: manager, now: now)),
         const SizedBox(height: 12),
         _logPanel(),
       ],
