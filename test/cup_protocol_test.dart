@@ -22,12 +22,13 @@ void main() {
       expect(p.timestamp, 0xFFFFFFFF);
     });
 
-    test('WATER:拆出水量與刻度', () {
-      // value = 0x000609C4:fill 2500 (25.00 %),level 6;timestamp 16
+    test('WATER:拆出 25-bit 水量與刻度', () {
+      // fill25 = 0x0800000 (2^23,約 25 %),level 6 -> value = (6 << 25) | 0x0800000
+      // = 0x0C800000 -> LE bytes 00 00 80 0C;timestamp 16
       final p = CupProtocol.decodeData(
-          [0x02, 0xC4, 0x09, 0x06, 0x00, 0x10, 0x00, 0x00, 0x00]) as WaterPacket;
-      expect(p.fillPermyriad, 2500);
-      expect(p.fillPercent, 25.0);
+          [0x02, 0x00, 0x00, 0x80, 0x0C, 0x10, 0x00, 0x00, 0x00]) as WaterPacket;
+      expect(p.fill25, 0x0800000);
+      expect(p.fillPercent, closeTo(25.0, 0.0001));
       expect(p.level, 6);
       expect(p.timestamp, 16);
     });
@@ -35,18 +36,32 @@ void main() {
     test('WATER:空杯與滿杯', () {
       final empty = CupProtocol.decodeData(
           [0x02, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0]) as WaterPacket;
-      expect(empty.fillPermyriad, 0);
+      expect(empty.fill25, 0);
+      expect(empty.fillPercent, 0);
       expect(empty.level, 0);
+      // fill25 = 0x1FFFFFF, level 10 -> value = (10 << 25) | 0x1FFFFFF = 0x15FFFFFF
       final full = CupProtocol.decodeData(
-          [0x02, 0x10, 0x27, 0x0A, 0x00, 0, 0, 0, 0]) as WaterPacket;
-      expect(full.fillPermyriad, 10000);
+          [0x02, 0xFF, 0xFF, 0xFF, 0x15, 0, 0, 0, 0]) as WaterPacket;
+      expect(full.fill25, WaterPacket.fill25Max);
+      expect(full.fillPercent, 100.0);
       expect(full.level, 10);
     });
 
-    test('WATER:超出範圍的值被夾住', () {
+    test('WATER:一個 fill25 單位的差異可被解析', () {
+      final a = CupProtocol.decodeData(
+          [0x02, 0x01, 0x00, 0x00, 0x00, 0, 0, 0, 0]) as WaterPacket;
+      final b = CupProtocol.decodeData(
+          [0x02, 0x02, 0x00, 0x00, 0x00, 0, 0, 0, 0]) as WaterPacket;
+      expect(a.fill25, 1);
+      expect(b.fill25, 2);
+      expect(b.fillPercent, greaterThan(a.fillPercent));
+    });
+
+    test('WATER:level 超過 10 被夾住,保留位元不影響水量', () {
+      // level bits = 0xF, reserved bits set, fill25 = 0
       final p = CupProtocol.decodeData(
-          [0x02, 0xFF, 0xFF, 0xFF, 0x00, 0, 0, 0, 0]) as WaterPacket;
-      expect(p.fillPermyriad, 10000);
+          [0x02, 0x00, 0x00, 0x00, 0xFE, 0, 0, 0, 0]) as WaterPacket;
+      expect(p.fill25, 0);
       expect(p.level, 10);
     });
 

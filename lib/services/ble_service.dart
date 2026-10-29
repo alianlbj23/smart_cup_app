@@ -63,21 +63,26 @@ class DummyDataPacket extends CupDataPacket {
 /// type 0x02:水量。
 class WaterPacket extends CupDataPacket {
   const WaterPacket({
-    required this.fillPermyriad,
+    required this.fill25,
     required this.level,
     required super.timestamp,
   });
 
-  /// 水量,單位 0.01 %,0(空杯)..10000(滿杯)。
-  final int fillPermyriad;
+  /// 水量,25-bit 分數:0(空杯)..[fill25Max](滿杯)。
+  final int fill25;
 
   /// 粗刻度 0..10。
   final int level;
 
   static const int maxLevel = 10;
+  static const int fill25Bits = 25;
+  static const int fill25Max = (1 << fill25Bits) - 1;
+
+  /// 水量比例 0.0..1.0。
+  double get fillFraction => fill25 / fill25Max;
 
   /// 水量百分比 0.0..100.0。
-  double get fillPercent => fillPermyriad / 100;
+  double get fillPercent => fillFraction * 100;
 }
 
 /// type 0x03:濾波後的電容原始計數,僅供除錯與校正。

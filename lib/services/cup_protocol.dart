@@ -59,7 +59,7 @@ class CupProtocol {
   /// Data Notify:type(1) + value(4) + timestamp(4) = 9 bytes。
   ///
   /// value 的位元配置依 message type 而異(韌體 `main/ble_gatt_svr.h`):
-  /// - 0x02 WATER:bits 15..0 水量 0.01 %,bits 23..16 level 0..10
+  /// - 0x02 WATER:bits 24..0 水量 25-bit 分數(0..2^25-1),bits 28..25 level 0..10
   /// - 0x03 RAW  :濾波後電容計數
   /// - 0x04 POSE :bits 15..0 傾斜角 0.1 度,bits 23..16 姿態,bits 31..24 移動
   ///
@@ -79,8 +79,9 @@ class CupProtocol {
         return DummyDataPacket(value: value, timestamp: timestamp);
       case msgTypeWater:
         return WaterPacket(
-          fillPermyriad: (value & 0xFFFF).clamp(0, 10000),
-          level: ((value >> 16) & 0xFF).clamp(0, WaterPacket.maxLevel),
+          fill25: value & WaterPacket.fill25Max,
+          level: ((value >> WaterPacket.fill25Bits) & 0x0F)
+              .clamp(0, WaterPacket.maxLevel),
           timestamp: timestamp,
         );
       case msgTypeRaw:

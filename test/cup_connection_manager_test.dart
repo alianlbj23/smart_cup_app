@@ -177,14 +177,14 @@ void main() {
     expect(manager.latestWater, isNull);
     expect(manager.isWaterStale(DateTime.now()), isTrue);
 
-    ble.pushPacket(
-        const WaterPacket(fillPermyriad: 6340, level: 6, timestamp: 100));
+    ble.pushPacket(const WaterPacket(
+        fill25: WaterPacket.fill25Max ~/ 2, level: 5, timestamp: 100));
     ble.pushPacket(const RawPacket(count: 292000, timestamp: 100));
     await settle();
 
     expect(manager.receivedCount, 2);
-    expect(manager.latestWater?.fillPercent, 63.4);
-    expect(manager.latestWater?.level, 6);
+    expect(manager.latestWater?.fillPercent, closeTo(50.0, 0.001));
+    expect(manager.latestWater?.level, 5);
     expect(manager.isWaterStale(DateTime.now()), isFalse);
     expect(
         manager.isWaterStale(
@@ -199,8 +199,7 @@ void main() {
     await manager.init();
     await manager.connectTo(_cup);
     await settle();
-    ble.pushPacket(
-        const WaterPacket(fillPermyriad: 1000, level: 1, timestamp: 1));
+    ble.pushPacket(const WaterPacket(fill25: 1000, level: 1, timestamp: 1));
     await settle();
     expect(manager.latestWater, isNotNull);
 

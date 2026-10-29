@@ -68,12 +68,14 @@ void main() {
     expect(find.textContaining('電量 80%'), findsOneWidget);
     expect(find.text('配對其他水杯'), findsOneWidget);
 
-    ble.pushPacket(
-        const WaterPacket(fillPermyriad: 6250, level: 6, timestamp: 1));
+    ble.pushPacket(const WaterPacket(
+        fill25: WaterPacket.fill25Max, level: 10, timestamp: 1));
     await tester.pumpAndSettle();
 
-    expect(find.text('62.5'), findsOneWidget);
-    expect(find.text('水量 62.50% · 刻度 6'), findsOneWidget);
+    expect(find.text('100.0000'), findsOneWidget);
+    expect(
+        find.text('水量 100.0000% · 刻度 10 · fill25 ${WaterPacket.fill25Max}'),
+        findsOneWidget);
     expect(find.textContaining('已接收 1 筆'), findsOneWidget);
   });
 

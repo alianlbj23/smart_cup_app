@@ -27,7 +27,7 @@ class CupReading extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              water == null ? '--' : water.fillPercent.toStringAsFixed(1),
+              water == null ? '--' : water.fillPercent.toStringAsFixed(4),
               style: TextStyle(
                   fontSize: 28, fontWeight: FontWeight.w700, color: color),
             ),
@@ -49,6 +49,7 @@ class CupReading extends StatelessWidget {
               : stale
                   ? '資料過期 · 更新於 ${fmtTime(updatedAt!)}'
                   : '刻度 ${water.level}/${WaterPacket.maxLevel} · '
+                      'fill25 ${water.fill25} · '
                       '更新於 ${fmtTime(updatedAt!)}',
           style: mutedSmall.copyWith(
               color: stale && water != null ? AppColors.orange : null),
@@ -105,7 +106,8 @@ class LevelBar extends StatelessWidget {
 /// 接收紀錄一行的文字。
 String describePacket(CupDataPacket p) => switch (p) {
       WaterPacket() =>
-        '水量 ${p.fillPercent.toStringAsFixed(2)}% · 刻度 ${p.level}',
+        '水量 ${p.fillPercent.toStringAsFixed(4)}% · 刻度 ${p.level} · '
+            'fill25 ${p.fill25}',
       RawPacket() => '原始值 ${p.count}',
       PosePacket() =>
         '姿態 ${p.pose.label} · ${p.tiltDegrees.toStringAsFixed(1)}°'
