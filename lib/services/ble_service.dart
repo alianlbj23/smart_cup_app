@@ -38,11 +38,12 @@ enum BleConnectionState {
   disconnected,
 }
 
-/// Data Notify 的 dummy 資料(規格書 §4,9-byte payload,message type 0x01)。
-class DummyDataPacket {
-  const DummyDataPacket({required this.value, required this.timestamp});
-
-  final int value;
+/// Data Notify 封包(9-byte payload:type(1) + value(4) + timestamp(4))。
+///
+/// 韌體 `main/ble_gatt_svr.h` 定義各 message type 的 value 編碼;
+/// 解碼在 `cup_protocol.dart`。
+sealed class CupDataPacket {
+  const CupDataPacket({required this.timestamp});
 
   /// 裝置端 Unix 秒數;TimeSync 前為裝置開機後秒數。
   final int timestamp;
@@ -52,15 +53,96 @@ class DummyDataPacket {
           .toLocal();
 }
 
-/// Device Status(暫定格式,見 `cup_protocol.dart`)。
-class DeviceStatus {
-  const DeviceStatus({
-    required this.batteryPercent,
-    required this.firmwareVersion,
+/// type 0x01:遞增計數器,只在開機後感測基準建立前出現,App 忽略即可。
+class DummyDataPacket extends CupDataPacket {
+  const DummyDataPacket({required this.value, required super.timestamp});
+
+  final int value;
+}
+
+/// type 0x02:水量。
+class WaterPacket extends CupDataPacket {
+  const WaterPacket({
+    required this.fillPermyriad,
+    required this.level,
+    required super.timestamp,
   });
 
+  /// 水量,單位 0.01 %,0(空杯)..10000(滿杯)。
+  final int fillPermyriad;
+
+  /// 粗刻度 0..10。
+  final int level;
+
+  static const int maxLevel = 10;
+
+  /// 水量百分比 0.0..100.0。
+  double get fillPercent => fillPermyriad / 100;
+}
+
+/// type 0x03:濾波後的電容原始計數,僅供除錯與校正。
+class RawPacket extends CupDataPacket {
+  const RawPacket({required this.count, required super.timestamp});
+
+  final int count;
+}
+
+/// 水杯姿態(type 0x04 的 bits 23..16)。
+enum CupPose {
+  unknown,
+  upright,
+  tilted,
+  drinking,
+  lying;
+
+  static CupPose fromCode(int code) =>
+      code >= 0 && code < CupPose.values.length
+          ? CupPose.values[code]
+          : CupPose.unknown;
+
+  String get label => switch (this) {
+        CupPose.unknown => '未知',
+        CupPose.upright => '直立',
+        CupPose.tilted => '傾斜',
+        CupPose.drinking => '飲用中',
+        CupPose.lying => '倒下',
+      };
+}
+
+/// type 0x04:姿態(韌體尚未送出,先預留解碼)。
+class PosePacket extends CupDataPacket {
+  const PosePacket({
+    required this.tiltDeciDegrees,
+    required this.pose,
+    required this.moving,
+    required super.timestamp,
+  });
+
+  /// 相對直立的傾斜角,單位 0.1 度,0..1800。
+  final int tiltDeciDegrees;
+  final CupPose pose;
+  final bool moving;
+
+  double get tiltDegrees => tiltDeciDegrees / 10;
+}
+
+/// 未知 message type:保留原始 value,不中斷資料流。
+class UnknownPacket extends CupDataPacket {
+  const UnknownPacket({
+    required this.type,
+    required this.value,
+    required super.timestamp,
+  });
+
+  final int type;
+  final int value;
+}
+
+/// Device Status(暫定格式,見 `cup_protocol.dart`)。
+class DeviceStatus {
+  const DeviceStatus({required this.batteryPercent});
+
   final int batteryPercent;
-  final String firmwareVersion;
 }
 
 enum BleErrorCode {
@@ -116,7 +198,7 @@ abstract interface class BleService {
 
   Future<void> writeAck();
 
-  Stream<DummyDataPacket> get dataNotifications;
+  Stream<CupDataPacket> get dataNotifications;
 
   Future<DeviceStatus> readDeviceStatus();
 

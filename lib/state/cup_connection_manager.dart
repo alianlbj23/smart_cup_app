@@ -30,7 +30,7 @@ enum CupFlow {
 class ReceivedPacket {
   const ReceivedPacket(this.packet, this.receivedAt, {required this.acked});
 
-  final DummyDataPacket packet;
+  final CupDataPacket packet;
   final DateTime receivedAt;
   final bool acked;
 }
@@ -58,6 +58,9 @@ class CupConnectionManager extends ChangeNotifier {
   static const maxReconnectAttempts = 3;
   static const maxLogEntries = 50;
 
+  /// 超過此時間沒收到 WATER 就視為過期(韌體每 5 秒送一次)。
+  static const waterStaleAfter = Duration(seconds: 15);
+
   final BleService _ble;
   final DeviceStore _store;
   late final List<StreamSubscription<Object?>> _subs;
@@ -73,6 +76,11 @@ class CupConnectionManager extends ChangeNotifier {
   DeviceStatus? _deviceStatus;
   final List<ReceivedPacket> _log = [];
   int _receivedCount = 0;
+  String? _logDeviceId;
+  WaterPacket? _latestWater;
+  DateTime? _latestWaterAt;
+  PosePacket? _latestPose;
+  DateTime? _latestPoseAt;
 
   /// [BleService.connect] 已完成,之後的斷線才算「連線中斷」。
   bool _linkUp = false;
@@ -91,22 +99,55 @@ class CupConnectionManager extends ChangeNotifier {
 
   /// 正在連線或已連線的裝置名稱。
   String? get connectingName => _deviceName;
+
+  /// 正在連線或已連線的裝置 id。
+  String? get activeDeviceId => _deviceId;
   DeviceStatus? get deviceStatus => _deviceStatus;
   List<ReceivedPacket> get log => List.unmodifiable(_log);
   int get receivedCount => _receivedCount;
 
-  /// App 啟動:有記憶裝置 → 自動重連,否則 → 首次配對掃描。
+  /// 最近一筆水量;尚未收到或已換杯/斷線時為 null。
+  WaterPacket? get latestWater => _latestWater;
+
+  /// 收到 [latestWater] 的手機時間。
+  DateTime? get latestWaterAt => _latestWaterAt;
+
+  /// 最近一筆姿態;韌體尚未送出時為 null。
+  PosePacket? get latestPose => _latestPose;
+  DateTime? get latestPoseAt => _latestPoseAt;
+
+  /// [latestWater] 是否已超過 [waterStaleAfter] 沒更新。
+  bool isWaterStale(DateTime now) {
+    final at = _latestWaterAt;
+    return at == null || now.difference(at) > waterStaleAfter;
+  }
+
+  /// App 啟動:有記憶裝置 → 自動重連;否則維持 Idle,由使用者為住民配對水杯。
   Future<void> init() async {
     _remembered = await _store.load();
     if (_disposed) return;
-    if (_remembered != null) {
-      await startAutoReconnect();
-    } else {
-      await startPairingScan();
-    }
+    if (_remembered != null) await startAutoReconnect();
   }
 
   // ---------------------------------------------------------------- 掃描
+
+  /// 為住民配對水杯:僅支援單一連線,先中斷目前水杯再開始配對掃描。
+  Future<void> beginPairing() async {
+    final pending = disconnect();
+    final session = _session;
+    await pending;
+    if (session != _session) return;
+    await startPairingScan();
+  }
+
+  /// 取消配對:停止掃描/連線,並回頭連線先前記憶的水杯。
+  Future<void> cancelPairing() async {
+    final pending = disconnect();
+    final session = _session;
+    await pending;
+    if (session != _session || _remembered == null) return;
+    await startAutoReconnect();
+  }
 
   /// 首次配對:依 Service UUID 過濾掃描,結果列於 [scanResults]。
   Future<void> startPairingScan() async {
@@ -174,6 +215,20 @@ class CupConnectionManager extends ChangeNotifier {
     }
   }
 
+  /// 切換到已配對的 [device]:記憶為目前水杯並走自動重連流程。
+  Future<void> reconnectTo(RememberedDevice device) async {
+    final session = _beginFlow();
+    _clearLink();
+    _message = null;
+    _remembered = device;
+    _flow = CupFlow.reconnect;
+    _setState(CupConnectionState.scanning);
+    await _safeDisconnect();
+    await _store.save(device);
+    if (session != _session) return;
+    await startAutoReconnect();
+  }
+
   // ---------------------------------------------------------------- 連線
 
   /// 首次配對:使用者從清單選擇裝置。
@@ -182,6 +237,13 @@ class CupConnectionManager extends ChangeNotifier {
 
   Future<void> _connect(String deviceId, String name) async {
     final session = _beginFlow();
+    if (_logDeviceId != deviceId) {
+      // 接收紀錄只屬於單一水杯,換杯時重新計數。
+      _log.clear();
+      _receivedCount = 0;
+      _logDeviceId = deviceId;
+      _clearReadings();
+    }
     _deviceId = deviceId;
     _deviceName = name;
     _linkUp = false;
@@ -271,24 +333,39 @@ class CupConnectionManager extends ChangeNotifier {
     await _safeDisconnect();
   }
 
-  /// 忘記此裝置:斷線、清除本地記憶,回到首次配對掃描。
+  /// 忘記此裝置:斷線、清除本地記憶,回到 Idle。
   Future<void> forgetDevice() async {
     _beginFlow();
     _clearLink();
-    await _safeDisconnect();
-    await _store.clear();
     _remembered = null;
+    _scanResults = const [];
+    _message = null;
     _log.clear();
     _receivedCount = 0;
-    await startPairingScan();
+    _clearReadings();
+    _flow = CupFlow.pairing;
+    _setState(CupConnectionState.idle);
+    await _safeDisconnect();
+    await _store.clear();
   }
 
   // ---------------------------------------------------------------- 資料
 
-  void _onData(DummyDataPacket packet) {
+  void _onData(CupDataPacket packet) {
     if (!_linkUp) return;
+    final now = DateTime.now();
     _receivedCount++;
-    _log.add(ReceivedPacket(packet, DateTime.now(), acked: false));
+    switch (packet) {
+      case WaterPacket():
+        _latestWater = packet;
+        _latestWaterAt = now;
+      case PosePacket():
+        _latestPose = packet;
+        _latestPoseAt = now;
+      case DummyDataPacket() || RawPacket() || UnknownPacket():
+        break;
+    }
+    _log.add(ReceivedPacket(packet, now, acked: false));
     if (_log.length > maxLogEntries) _log.removeAt(0);
     notifyListeners();
 
@@ -327,6 +404,13 @@ class CupConnectionManager extends ChangeNotifier {
     _deviceId = null;
     _deviceName = null;
     _deviceStatus = null;
+  }
+
+  void _clearReadings() {
+    _latestWater = null;
+    _latestWaterAt = null;
+    _latestPose = null;
+    _latestPoseAt = null;
   }
 
   Future<void> _safeDisconnect() async {

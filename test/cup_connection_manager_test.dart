@@ -35,9 +35,18 @@ void main() {
   });
 
   group('首次配對', () {
-    test('無記憶裝置 → 掃描並列出清單(依 RSSI 排序)', () async {
+    test('無記憶裝置 → 啟動時不掃描,維持 Idle', () async {
+      await manager.init();
+      await settle();
+
+      expect(ble.scanCalls, isEmpty);
+      expect(manager.state, CupConnectionState.idle);
+    });
+
+    test('開始配對 → 中斷目前水杯,掃描並列出清單(依 RSSI 排序)', () async {
       ble.devicesInRange = [_cup, _other];
       await manager.init();
+      await manager.beginPairing();
       await settle();
 
       expect(ble.scanCalls, [null], reason: '非定向掃描');
@@ -154,12 +163,55 @@ void main() {
     await settle();
 
     expect(manager.receivedCount, 1);
-    expect(manager.log.single.packet.value, 42);
+    expect((manager.log.single.packet as DummyDataPacket).value, 42);
     expect(manager.log.single.acked, isTrue);
     expect(ble.ackCount, 1);
   });
 
-  test('忘記此裝置 → 斷線、清除記憶、回到配對掃描', () async {
+  test('Ready 時收到 WATER → latestWater 更新,RAW 不影響水量', () async {
+    ble.devicesInRange = [_cup];
+    await manager.init();
+    await manager.connectTo(_cup);
+    await settle();
+
+    expect(manager.latestWater, isNull);
+    expect(manager.isWaterStale(DateTime.now()), isTrue);
+
+    ble.pushPacket(
+        const WaterPacket(fillPermyriad: 6340, level: 6, timestamp: 100));
+    ble.pushPacket(const RawPacket(count: 292000, timestamp: 100));
+    await settle();
+
+    expect(manager.receivedCount, 2);
+    expect(manager.latestWater?.fillPercent, 63.4);
+    expect(manager.latestWater?.level, 6);
+    expect(manager.isWaterStale(DateTime.now()), isFalse);
+    expect(
+        manager.isWaterStale(
+            DateTime.now().add(CupConnectionManager.waterStaleAfter * 2)),
+        isTrue);
+    expect(manager.latestPose, isNull);
+    expect(ble.ackCount, 2);
+  });
+
+  test('忘記此裝置 → latestWater 清除', () async {
+    ble.devicesInRange = [_cup];
+    await manager.init();
+    await manager.connectTo(_cup);
+    await settle();
+    ble.pushPacket(
+        const WaterPacket(fillPermyriad: 1000, level: 1, timestamp: 1));
+    await settle();
+    expect(manager.latestWater, isNotNull);
+
+    await manager.forgetDevice();
+    await settle();
+
+    expect(manager.latestWater, isNull);
+    expect(manager.latestWaterAt, isNull);
+  });
+
+  test('忘記此裝置 → 斷線、清除記憶、回到 Idle', () async {
     await remember(_cup);
     ble.devicesInRange = [_cup];
     await manager.init();
@@ -171,8 +223,38 @@ void main() {
     expect(await store.load(), isNull);
     expect(manager.rememberedDevice, isNull);
     expect(ble.isConnected, isFalse);
-    expect(manager.flow, CupFlow.pairing);
-    expect(ble.scanCalls.last, isNull);
+    expect(manager.state, CupConnectionState.idle);
+    expect(ble.scanCalls, ['AA:BB'], reason: '不再自動掃描');
+  });
+
+  test('切換到另一個已配對水杯 → 中斷目前水杯並連線新水杯', () async {
+    await remember(_cup);
+    ble.devicesInRange = [_cup, _other];
+    await manager.init();
+    await settle();
+
+    await manager.reconnectTo(
+        RememberedDevice(id: _other.deviceId, name: _other.deviceName));
+    await settle();
+
+    expect(manager.state, CupConnectionState.ready);
+    expect(manager.activeDeviceId, 'CC:DD');
+    expect((await store.load())?.id, 'CC:DD');
+  });
+
+  test('取消配對 → 回頭連線先前記憶的水杯', () async {
+    await remember(_cup);
+    ble.devicesInRange = [_cup];
+    await manager.init();
+    await settle();
+
+    await manager.beginPairing();
+    expect(ble.isConnected, isFalse);
+    await manager.cancelPairing();
+    await settle();
+
+    expect(manager.state, CupConnectionState.ready);
+    expect(manager.activeDeviceId, 'AA:BB');
   });
 
   test('連線中取消 → Idle,完成的連線結果被捨棄', () async {

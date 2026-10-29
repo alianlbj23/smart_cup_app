@@ -30,7 +30,7 @@ class FlutterBluePlusService implements BleService {
 
   final _stateCtrl = StreamController<BleConnectionState>.broadcast();
   final _scanCtrl = StreamController<List<BleDeviceInfo>>.broadcast();
-  final _dataCtrl = StreamController<DummyDataPacket>.broadcast();
+  final _dataCtrl = StreamController<CupDataPacket>.broadcast();
   final _statusCtrl = StreamController<DeviceStatus>.broadcast();
 
   BleConnectionState _state = BleConnectionState.idle;
@@ -52,7 +52,7 @@ class FlutterBluePlusService implements BleService {
   Stream<List<BleDeviceInfo>> get scanResults => _scanCtrl.stream;
 
   @override
-  Stream<DummyDataPacket> get dataNotifications => _dataCtrl.stream;
+  Stream<CupDataPacket> get dataNotifications => _dataCtrl.stream;
 
   @override
   Stream<DeviceStatus> get deviceStatusUpdates => _statusCtrl.stream;
@@ -328,7 +328,12 @@ class FlutterBluePlusService implements BleService {
 
   void _onDataRaw(List<int> raw) {
     try {
-      _addTo(_dataCtrl, CupProtocol.decodeData(raw));
+      final packet = CupProtocol.decodeData(raw);
+      if (packet is UnknownPacket) {
+        debugPrint('[BLE] 未知的 message type 0x'
+            '${packet.type.toRadixString(16)},value=${packet.value}');
+      }
+      _addTo(_dataCtrl, packet);
     } on FormatException catch (e) {
       debugPrint('[BLE] 忽略格式錯誤的資料:${e.message}');
     }

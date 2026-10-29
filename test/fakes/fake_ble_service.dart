@@ -6,7 +6,7 @@ import 'package:stut_food_intake_project/services/ble_service.dart';
 class FakeBleService implements BleService {
   final _stateCtrl = StreamController<BleConnectionState>.broadcast();
   final _scanCtrl = StreamController<List<BleDeviceInfo>>.broadcast();
-  final _dataCtrl = StreamController<DummyDataPacket>.broadcast();
+  final _dataCtrl = StreamController<CupDataPacket>.broadcast();
   final _statusCtrl = StreamController<DeviceStatus>.broadcast();
 
   /// 掃描時會「看到」的裝置。
@@ -33,7 +33,7 @@ class FakeBleService implements BleService {
   Stream<List<BleDeviceInfo>> get scanResults => _scanCtrl.stream;
 
   @override
-  Stream<DummyDataPacket> get dataNotifications => _dataCtrl.stream;
+  Stream<CupDataPacket> get dataNotifications => _dataCtrl.stream;
 
   @override
   Stream<DeviceStatus> get deviceStatusUpdates => _statusCtrl.stream;
@@ -98,7 +98,7 @@ class FakeBleService implements BleService {
   @override
   Future<DeviceStatus> readDeviceStatus() async {
     _requireConnected();
-    return const DeviceStatus(batteryPercent: 80, firmwareVersion: '0.1.0');
+    return const DeviceStatus(batteryPercent: 80);
   }
 
   void _requireConnected() {
@@ -107,9 +107,12 @@ class FakeBleService implements BleService {
     }
   }
 
-  /// 模擬裝置推送一筆 Data Notify。
+  /// 模擬裝置推送一筆 dummy Data Notify。
   void pushData(int value, int timestamp) =>
       _dataCtrl.add(DummyDataPacket(value: value, timestamp: timestamp));
+
+  /// 模擬裝置推送任一種 Data Notify。
+  void pushPacket(CupDataPacket packet) => _dataCtrl.add(packet);
 
   /// 模擬意外斷線。
   void dropLink() {
