@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:stut_food_intake_project/main.dart';
 import 'package:stut_food_intake_project/services/ble_service.dart';
-import 'package:stut_food_intake_project/state/care_store.dart';
 import 'package:stut_food_intake_project/state/cup_connection_manager.dart';
 
 import 'fakes/fake_ble_service.dart';
@@ -13,81 +12,163 @@ const _cup = BleDeviceInfo(deviceId: 'AA:BB', deviceName: 'SmartCup', rssi: -50)
 void main() {
   late FakeBleService ble;
   late CupConnectionManager manager;
-  late CareStore store;
 
-  Future<void> pumpApp(WidgetTester tester, Size size) async {
+  /// [remembered] 不為 null 時視為先前已配對,並如 main() 一樣呼叫 init()。
+  Future<void> pumpApp(WidgetTester tester, Size size,
+      {BleDeviceInfo? remembered, List<BleDeviceInfo> inRange = const []}) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    SharedPreferences.setMockInitialValues({});
-    ble = FakeBleService();
+    SharedPreferences.setMockInitialValues({
+      if (remembered != null) ...{
+        'remembered_device_id': remembered.deviceId,
+        'remembered_device_name': remembered.deviceName,
+      },
+    });
+    ble = FakeBleService()..devicesInRange = inRange;
     manager = CupConnectionManager(ble: ble);
-    store = CareStore();
     addTearDown(() {
       manager.dispose();
       ble.dispose();
     });
-    await tester.runAsync(store.load);
-    await tester.pumpWidget(SmartCupApp(manager: manager, store: store));
+    await tester.pumpWidget(SmartCupApp(manager: manager));
+    if (remembered != null) {
+      manager.init();
+      await tester.pumpAndSettle();
+    }
     await tester.pump();
   }
 
-  testWidgets('寬版:總覽顯示指標、住民與水杯配對入口', (tester) async {
-    await pumpApp(tester, const Size(1400, 1000));
-
-    expect(find.text('今日飲水照護'), findsOneWidget);
-    expect(find.text('全區平均進度'), findsOneWidget);
-    expect(find.text('水杯配對'), findsOneWidget);
-    expect(find.text('水杯未連線'), findsOneWidget);
-    expect(find.text('配對水杯'), findsNWidgets(2), reason: '區塊標題與按鈕');
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('快速登錄飲水量', (tester) async {
-    await pumpApp(tester, const Size(1400, 1000));
-    final r = store.selected!;
-    final before = r.totalOn(DateTime.now());
-
-    await tester.tap(find.text('+200 mL'));
-    await tester.pump();
-
-    expect(r.totalOn(DateTime.now()), before + 200);
-  });
-
-  testWidgets('為住民配對水杯 → 連線成功後寫入配對並顯示已連線', (tester) async {
-    await pumpApp(tester, const Size(1400, 1000));
+  Future<void> pairCup(WidgetTester tester) async {
     ble.devicesInRange = [_cup];
-    final r = store.selected!;
-
-    await tester.tap(find.widgetWithText(FilledButton, '配對水杯'));
+    await tester.tap(find.text('配對水杯'));
     await tester.pumpAndSettle();
-    expect(find.text('為「${r.name}」配對水杯'), findsOneWidget);
-
     await tester.tap(find.text('SmartCup'));
     await tester.pumpAndSettle();
+  }
 
-    expect(r.cupId, 'AA:BB');
-    expect(manager.state, CupConnectionState.ready);
-    expect(find.text('水杯已連線 · ${r.name}'), findsOneWidget);
-    expect(find.text('電量 80%'), findsOneWidget);
+  testWidgets('啟動未配對 → 只有水杯頁:未連線與配對入口', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+
+    expect(find.text('目前連線:未連線'), findsOneWidget);
+    expect(find.text('配對水杯'), findsOneWidget);
+    expect(find.text('尚未收到資料'), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
-  testWidgets('窄版(手機):底部導覽可切換各分頁', (tester) async {
-    await pumpApp(tester, const Size(390, 844));
-    expect(find.byType(NavigationBar), findsOneWidget);
-    expect(tester.takeException(), isNull);
+  testWidgets('配對水杯 → 連線成功後顯示電量、水量與接收紀錄', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+    await pairCup(tester);
 
-    for (final (tab, title) in [
-      ('住民', '住民資料'),
-      ('提醒', '提醒中心'),
-      ('統計', '統計分析'),
-      ('水杯', '水杯裝置'),
-    ]) {
-      await tester.tap(find.text(tab));
-      await tester.pump();
-      expect(find.text(title), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    }
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(manager.state, CupConnectionState.ready);
+    expect(find.text('目前連線:已連線'), findsOneWidget);
+    expect(find.textContaining('電量 80%'), findsOneWidget);
+    expect(find.text('配對其他水杯'), findsOneWidget);
+
+    ble.pushPacket(
+        const WaterPacket(fillPermyriad: 6250, level: 6, timestamp: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.text('62.5'), findsOneWidget);
+    expect(find.text('水量 62.50% · 刻度 6'), findsOneWidget);
+    expect(find.textContaining('已接收 1 筆'), findsOneWidget);
+  });
+
+  testWidgets('有記憶水杯 → 啟動自動重連,顯示中斷/配對其他/忘記', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000),
+        remembered: _cup, inRange: [_cup]);
+
+    expect(manager.state, CupConnectionState.ready);
+    expect(find.text('中斷連線'), findsOneWidget);
+    expect(find.text('配對其他水杯'), findsOneWidget);
+    expect(find.text('忘記此水杯'), findsOneWidget);
+    expect(find.text('配對水杯'), findsNothing);
+    expect(find.text('連線'), findsNothing);
+  });
+
+  testWidgets('中斷連線 → 未連線但保留記憶,可再按「連線」重連', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000),
+        remembered: _cup, inRange: [_cup]);
+
+    await tester.tap(find.text('中斷連線'));
+    await tester.pumpAndSettle();
+
+    expect(manager.state, CupConnectionState.idle);
+    expect(find.text('目前連線:未連線'), findsOneWidget);
+    expect(find.textContaining('SmartCup · AA:BB'), findsOneWidget);
+    expect(find.text('中斷連線'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilledButton, '連線'));
+    await tester.pumpAndSettle();
+
+    expect(manager.state, CupConnectionState.ready);
+    expect(find.text('中斷連線'), findsOneWidget);
+  });
+
+  testWidgets('記憶水杯不在附近 → 找不到水杯,顯示「重試」', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000), remembered: _cup);
+
+    expect(manager.state, CupConnectionState.notFound);
+    expect(find.text('目前連線:找不到水杯'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '重試'), findsOneWidget);
+    expect(find.text('中斷連線'), findsNothing);
+
+    ble.devicesInRange = [_cup];
+    await tester.tap(find.widgetWithText(FilledButton, '重試'));
+    await tester.pumpAndSettle();
+
+    expect(manager.state, CupConnectionState.ready);
+  });
+
+  testWidgets('配對時找不到水杯 → 提示並可取消,維持未連線', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+
+    await tester.tap(find.text('配對水杯'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('尚未找到水杯'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(manager.state, CupConnectionState.idle);
+    expect(manager.rememberedDevice, isNull);
+  });
+
+  testWidgets('連線失敗 → 對話框留著並顯示錯誤', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+    ble.connectError =
+        const BleException(BleErrorCode.connectionFailed, '模擬連線失敗');
+
+    await pairCup(tester);
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(manager.state, isNot(CupConnectionState.ready));
+    expect(find.textContaining('模擬連線失敗'), findsWidgets);
+  });
+
+  testWidgets('忘記此水杯 → 確認後斷線並回到未配對', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+    await pairCup(tester);
+
+    await tester.tap(find.text('忘記此水杯'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '忘記'));
+    await tester.pumpAndSettle();
+
+    expect(manager.rememberedDevice, isNull);
+    expect(ble.isConnected, isFalse);
+    expect(find.text('配對水杯'), findsOneWidget);
+  });
+
+  testWidgets('窄版(手機):連線後版面不溢位', (tester) async {
+    await pumpApp(tester, const Size(390, 844));
+    await pairCup(tester);
+
+    expect(find.text('目前連線:已連線'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

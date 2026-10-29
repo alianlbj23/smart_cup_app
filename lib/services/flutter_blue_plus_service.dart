@@ -75,12 +75,17 @@ class FlutterBluePlusService implements BleService {
     final sub = FlutterBluePlus.onScanResults.listen((results) {
       if (gen != _scanGen) return;
       for (final r in results) {
-        // 部分 Android 機型的硬體 Service 過濾器會漏放無關裝置,需再自行確認。
+        final info = _toInfo(r);
+        // 平台的硬體過濾是 OR 且可能漏放無關裝置,這裡再自行確認一次。
+        // Windows 的廣播與掃描回應分開回報,Service UUID 可能缺漏,改以名稱補救。
         if (deviceId == null &&
-            !r.advertisementData.serviceUuids.contains(_service)) {
+            !CupGatt.isSmartCup(
+              hasService:
+                  r.advertisementData.serviceUuids.contains(_service),
+              name: info.deviceName,
+            )) {
           continue;
         }
-        final info = _toInfo(r);
         found[info.deviceId] = info;
       }
       _addTo(_scanCtrl, found.values.toList());
@@ -93,8 +98,10 @@ class FlutterBluePlusService implements BleService {
 
     try {
       // 定向掃描用 remoteId 過濾;flutter_blue_plus 的多個過濾條件是 OR,不可與 service 並用。
+      // 配對掃描同時放寬為 Service UUID 或名稱關鍵字,上方再精確過濾。
       await FlutterBluePlus.startScan(
         withServices: deviceId == null ? [_service] : const [],
+        withKeywords: deviceId == null ? const [CupGatt.namePrefix] : const [],
         withRemoteIds: deviceId == null ? const [] : [deviceId],
       );
       if (_state == BleConnectionState.idle ||
@@ -198,7 +205,7 @@ class FlutterBluePlusService implements BleService {
     _emit(BleConnectionState.connecting);
 
     try {
-      await device.connect(license: License.nonprofit, timeout: _connectTimeout);
+      await _connectWithRetry(device);
       _checkCurrent(device);
       _linkUp = true;
       _emit(BleConnectionState.connected);
@@ -254,6 +261,30 @@ class FlutterBluePlusService implements BleService {
           ? e
           : BleException(BleErrorCode.connectionFailed, _describe(e));
     }
+  }
+
+  /// 建立連線,失敗時重試一次。
+  ///
+  /// Windows(flutter_blue_plus_winrt)在 5 秒內連不上時會回報「已連線」而非丟例外,
+  /// 之後的操作才會以 "device is not connected" 失敗,因此連線後再確認一次狀態。
+  /// 訊號弱(RSSI 低於約 -75 dBm)時第一次嘗試常常失敗,重試一次成功率明顯較高。
+  Future<void> _connectWithRetry(BluetoothDevice device) async {
+    const attempts = 2;
+    for (var i = 1; i <= attempts; i++) {
+      await device.connect(license: License.nonprofit, timeout: _connectTimeout);
+      _checkCurrent(device);
+      if (device.isConnected) return;
+      debugPrint('[BLE] 連線第 $i 次未建立鏈路');
+      if (i < attempts) {
+        await _release(device);
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        _checkCurrent(device);
+      }
+    }
+    throw const BleException(
+      BleErrorCode.connectionFailed,
+      '水杯沒有回應,請把水杯移近電腦(30 公分內)後重試',
+    );
   }
 
   /// 連線途中被 [disconnect] 或新的 [connect] 取代時中止。

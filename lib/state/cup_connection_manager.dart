@@ -58,8 +58,8 @@ class CupConnectionManager extends ChangeNotifier {
   static const maxReconnectAttempts = 3;
   static const maxLogEntries = 50;
 
-  /// 超過此時間沒收到 WATER 就視為過期(韌體每 5 秒送一次)。
-  static const waterStaleAfter = Duration(seconds: 15);
+  /// 超過此時間沒收到 WATER 就視為過期(韌體每 1 秒送一次)。
+  static const waterStaleAfter = Duration(seconds: 5);
 
   final BleService _ble;
   final DeviceStore _store;

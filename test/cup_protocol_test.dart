@@ -89,6 +89,20 @@ void main() {
     });
   });
 
+  group('掃描結果辨識', () {
+    test('有 Service UUID 即為智慧水杯', () {
+      expect(CupGatt.isSmartCup(hasService: true, name: ''), isTrue);
+    });
+    test('沒有 Service UUID 但名稱為 SmartCup- 開頭也算', () {
+      expect(CupGatt.isSmartCup(hasService: false, name: 'SmartCup-5626'),
+          isTrue);
+    });
+    test('兩者皆無則不是', () {
+      expect(CupGatt.isSmartCup(hasService: false, name: 'MyPhone'), isFalse);
+      expect(CupGatt.isSmartCup(hasService: false, name: ''), isFalse);
+    });
+  });
+
   test('Time Sync 編碼為 4 bytes little-endian Unix 秒數', () {
     expect(CupProtocol.encodeTimeSync(0x686B2F00), [0x00, 0x2F, 0x6B, 0x68]);
   });

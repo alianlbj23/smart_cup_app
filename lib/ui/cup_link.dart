@@ -1,172 +1,66 @@
 import 'package:flutter/material.dart';
 
-import '../models/resident.dart';
-import '../services/device_store.dart';
-import '../state/care_store.dart';
 import '../state/cup_connection_manager.dart';
 import 'theme.dart';
-
-/// 住民與其配對水杯之間的連線狀況。
-enum CupLink {
-  /// 尚未配對水杯。
-  none,
-
-  /// 已配對但未連線。
-  offline,
-
-  /// 尋找/連線中。
-  linking,
-
-  /// 自動重連逾時找不到。
-  notFound,
-  connected,
-}
-
-CupLink cupLinkOf(CupConnectionManager m, Resident r) {
-  final id = r.cupId;
-  if (id == null) return CupLink.none;
-  final isTarget = m.activeDeviceId == id ||
-      (m.flow == CupFlow.reconnect && m.rememberedDevice?.id == id);
-  if (!isTarget) return CupLink.offline;
-  return switch (m.state) {
-    CupConnectionState.ready =>
-      m.activeDeviceId == id ? CupLink.connected : CupLink.offline,
-    CupConnectionState.notFound => CupLink.notFound,
-    CupConnectionState.idle => CupLink.offline,
-    _ => CupLink.linking,
-  };
-}
 
 String cupDisplayName(String? name) =>
     (name == null || name.isEmpty) ? '智慧水杯' : name;
 
-(String, Color) _linkStyle(CupLink link) => switch (link) {
-      CupLink.none => ('未配對', AppColors.muted),
-      CupLink.offline => ('未連線', AppColors.muted),
-      CupLink.linking => ('連線中', AppColors.orange),
-      CupLink.notFound => ('找不到水杯', AppColors.red),
-      CupLink.connected => ('已連線', AppColors.teal),
+String cupStateLabel(CupConnectionState s) => switch (s) {
+      CupConnectionState.idle => '未連線',
+      CupConnectionState.scanning => '搜尋中',
+      CupConnectionState.connecting => '連線中',
+      CupConnectionState.connected => '已連線,初始化中',
+      CupConnectionState.serviceDiscovered => '初始化中',
+      CupConnectionState.ready => '已連線',
+      CupConnectionState.notFound => '找不到水杯',
     };
 
-/// 水杯連線狀態標籤。
-class CupStatusPill extends StatelessWidget {
-  const CupStatusPill({super.key, required this.link});
-
-  final CupLink link;
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, color) = _linkStyle(link);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            link == CupLink.connected
-                ? Icons.bluetooth_connected
-                : Icons.local_drink_outlined,
-            size: 13,
-            color: color,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-                fontSize: 12, color: color, fontWeight: FontWeight.w600),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 連線到住民已配對的水杯。
-void connectCup(CupConnectionManager manager, Resident r) {
-  final id = r.cupId;
-  if (id == null) return;
-  manager.reconnectTo(RememberedDevice(id: id, name: r.cupName ?? ''));
-}
-
-/// 解除住民與水杯的配對(確認後)。
-Future<void> unpairCup(
+/// 忘記目前的水杯(確認後):斷線並清除記憶,之後需重新配對。
+Future<void> confirmForgetCup(
   BuildContext context,
   CupConnectionManager manager,
-  CareStore store,
-  Resident r,
 ) async {
+  final name = cupDisplayName(
+      manager.connectingName ?? manager.rememberedDevice?.name);
   final ok = await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('解除水杯配對?'),
-      content: Text(
-        '將解除「${r.name}」與「${cupDisplayName(r.cupName)}」的配對,'
-        '之後需重新配對。',
-      ),
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('忘記此水杯?'),
+      content: Text('將中斷並忘記「$name」,之後需重新配對。'),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: () => Navigator.pop(dialogContext, false),
           child: const Text('取消'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('解除配對'),
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: const Text('忘記'),
         ),
       ],
     ),
   );
   if (ok != true) return;
-  await releaseCup(manager, store, r);
+  await manager.forgetDevice();
 }
 
-/// 移除配對;若該水杯是目前記憶/連線的水杯則一併斷線並忘記。
-Future<void> releaseCup(
-  CupConnectionManager manager,
-  CareStore store,
-  Resident r,
-) async {
-  final cupId = r.cupId;
-  if (cupId == null) return;
-  await store.unassignCup(r.id);
-  if (manager.rememberedDevice?.id == cupId ||
-      manager.activeDeviceId == cupId) {
-    await manager.forgetDevice();
-  }
-}
-
-/// 為 [resident] 掃描並配對水杯;連線成功後寫入配對並關閉。
+/// 掃描並配對水杯;連線成功後關閉,取消則回頭連線先前的水杯。
 Future<void> showCupPairingDialog(
   BuildContext context,
   CupConnectionManager manager,
-  CareStore store,
-  Resident resident,
 ) async {
   manager.beginPairing();
   final paired = await showDialog<bool>(
     context: context,
-    builder: (context) => _CupPairingDialog(
-      manager: manager,
-      store: store,
-      resident: resident,
-    ),
+    builder: (context) => _CupPairingDialog(manager: manager),
   );
   if (paired != true) await manager.cancelPairing();
 }
 
 class _CupPairingDialog extends StatefulWidget {
-  const _CupPairingDialog({
-    required this.manager,
-    required this.store,
-    required this.resident,
-  });
+  const _CupPairingDialog({required this.manager});
 
   final CupConnectionManager manager;
-  final CareStore store;
-  final Resident resident;
 
   @override
   State<_CupPairingDialog> createState() => _CupPairingDialogState();
@@ -194,8 +88,6 @@ class _CupPairingDialogState extends State<_CupPairingDialog> {
     final pending = _pendingId;
     if (pending != null) {
       if (m.state == CupConnectionState.ready && m.activeDeviceId == pending) {
-        widget.store
-            .assignCup(widget.resident.id, pending, m.connectingName ?? '');
         _pendingId = null;
         Navigator.pop(context, true);
         return;
@@ -213,7 +105,7 @@ class _CupPairingDialogState extends State<_CupPairingDialog> {
     final m = widget.manager;
     final connecting = _pendingId != null;
     return AlertDialog(
-      title: Text('為「${widget.resident.name}」配對水杯'),
+      title: const Text('配對水杯'),
       contentPadding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
       content: SizedBox(
         width: 420,
@@ -268,11 +160,6 @@ class _CupPairingDialogState extends State<_CupPairingDialog> {
                       separatorBuilder: (_, _) => const Divider(),
                       itemBuilder: (context, i) {
                         final d = m.scanResults[i];
-                        final owner = widget.store.ownerOfCup(d.deviceId);
-                        final movedFrom =
-                            owner != null && owner.id != widget.resident.id
-                                ? owner
-                                : null;
                         return ListTile(
                           enabled: !connecting,
                           contentPadding:
@@ -280,13 +167,7 @@ class _CupPairingDialogState extends State<_CupPairingDialog> {
                           leading: const Icon(Icons.local_drink,
                               color: AppColors.teal),
                           title: Text(cupDisplayName(d.deviceName)),
-                          subtitle: Text(
-                            movedFrom == null
-                                ? d.deviceId
-                                : '${d.deviceId}\n目前配對給 ${movedFrom.name},'
-                                    '選擇後改配給 ${widget.resident.name}',
-                            style: mutedSmall,
-                          ),
+                          subtitle: Text(d.deviceId, style: mutedSmall),
                           trailing: Text('${d.rssi} dBm', style: mutedSmall),
                           onTap: () {
                             setState(() => _pendingId = d.deviceId);

@@ -1,6 +1,6 @@
-# smart_cup_app（潤心照護）
+# smart_cup_app（智慧水杯）
 
-透過 BLE 連線 ESP32-C6 智慧水杯、記錄住民飲水量的 Flutter App。
+透過 BLE 連線 ESP32-C6 智慧水杯，顯示水量、姿態與接收紀錄的 Flutter App。
 
 - BLE：`flutter_blue_plus`（只在 [lib/services/flutter_blue_plus_service.dart](lib/services/flutter_blue_plus_service.dart) 使用）
 - 本地儲存：`shared_preferences`
@@ -19,8 +19,8 @@ flutter run -d linux       # Linux
 flutter run                # 手機用 USB 接上電腦（Android 要開啟 USB 偵錯）
 ```
 
-- 第一次啟動會自動建立幾位**示範住民和飲水紀錄**，沒有水杯也可以先看總覽、住民詳情和手動登錄飲水量。
-- 要測試連線，先打開水杯電源，再打開任一位住民的詳情頁，按「配對水杯」，然後從清單點選水杯。
+- App 目前只有一個水杯頁面。先打開水杯電源，按「配對水杯」，再從清單點選水杯；連線後會顯示電量、水量、姿態和接收紀錄。
+- 配對過的水杯會被記住，下次開 App 會自動重連；不要用了可以按「忘記此水杯」。
 - 執行中在終端機按 `r` 熱重載、`R` 重新啟動、`q` 結束。
 - 看不到裝置的話，先執行 `flutter devices` 確認裝置有被偵測到。macOS 版目前還不能連水杯（見下方 [macOS](#macos只能在-macos-上編譯)）。
 

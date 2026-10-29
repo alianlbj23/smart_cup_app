@@ -11,6 +11,15 @@ class CupGatt {
 
   static const service = '3c8b0001-efc1-4061-946c-e5916790df93';
 
+  /// 韌體廣播名稱前綴("SmartCup-" + MAC 末兩個 byte,例如 SmartCup-5626)。
+  /// 部分平台(Windows、某些 Android)掃描結果裡的 Service UUID 會缺漏,
+  /// 名稱是第二個辨識依據。
+  static const namePrefix = 'SmartCup-';
+
+  /// 掃描結果是否為智慧水杯:廣播了本 Service,或名稱符合 [namePrefix]。
+  static bool isSmartCup({required bool hasService, required String name}) =>
+      hasService || name.startsWith(namePrefix);
+
   /// App→ESP32,Write:Unix Timestamp。
   static const timeSync = '3c8b0002-efc1-4061-946c-e5916790df93';
 
