@@ -4,7 +4,7 @@
 
 - BLE：`flutter_blue_plus`（只在 [lib/services/flutter_blue_plus_service.dart](lib/services/flutter_blue_plus_service.dart) 使用）
 - 本地儲存：`shared_preferences`
-- 水杯韌體：[firmware/smart_cup_esp32c6/](firmware/smart_cup_esp32c6/)（Arduino sketch，另外燒錄，不在本文件範圍）
+- 水杯韌體：[smart_cup_firmware](https://github.com/alianlbj23/smart_cup_firmware)（ESP-IDF，另一個 repo；BLE 程式在 `main/ble_gatt_svr.c` / `main/ble_gatt_svr.h`，不在本文件範圍）
 
 ## 快速試跑（不打包，直接執行）
 
@@ -19,10 +19,32 @@ flutter run -d linux       # Linux
 flutter run                # 手機用 USB 接上電腦（Android 要開啟 USB 偵錯）
 ```
 
-- App 目前只有一個水杯頁面。先打開水杯電源，按「配對水杯」，再從清單點選水杯；連線後會顯示電量、水量、姿態和接收紀錄。
+- App 目前只有一個水杯頁面。先打開水杯電源，按「配對水杯」，再從清單點選水杯；連線後會顯示電量、水量、水杯姿態（側視圖、水平儀、傾斜角）和接收紀錄。
 - 配對過的水杯會被記住，下次開 App 會自動重連；不要用了可以按「忘記此水杯」。
 - 執行中在終端機按 `r` 熱重載、`R` 重新啟動、`q` 結束。
 - 看不到裝置的話，先執行 `flutter devices` 確認裝置有被偵測到。macOS 版目前還不能連水杯（見下方 [macOS](#macos只能在-macos-上編譯)）。
+
+## BLE 資料格式
+
+GATT Service 與各 Characteristic 的 UUID 定義在 [lib/services/cup_protocol.dart](lib/services/cup_protocol.dart)，必須和韌體 `main/ble_gatt_svr.h` 一致。
+
+**Data Notify**（ESP32 → App）固定 9 bytes：`type`(1) + `value`(uint32 LE, 4) + `timestamp`(uint32 LE, 4，Unix 秒)。
+
+| type | 名稱 | 頻率 | value 內容 | App 處理 |
+| --- | --- | --- | --- | --- |
+| `0x02` | WATER | 1 次/秒 | bits 24..0 水量 25-bit 分數（0 空杯 .. 2^25-1 滿杯）；bits 28..25 粗刻度 0..10 | 回 ACK、記入接收紀錄 |
+| `0x03` | RAW | 除錯用 | 濾波後電容計數 | 回 ACK、記入接收紀錄 |
+| `0x04` | POSE | 1 次/秒，姿態改變時立即送 | bits 15..0 傾斜角（0.1°，0..1800）；bits 23..16 姿態（0 未知 / 1 直立 / 2 傾斜 / 3 飲用中 / 4 倒下）；bits 31..24 移動旗標（非 0 = 移動中） | 回 ACK、記入接收紀錄 |
+| `0x05` | ATTITUDE | 約 5 次/秒 | bits 15..0 pitch、bits 31..16 roll，皆為 **int16 有號**、單位 0.1°、範圍 -1800..1800。roll 正 = 杯口往右倒；pitch 正 = 杯口往前（遠離觀看者）；直立時兩者約 0 | 即時資料：**不回 ACK、不記入接收紀錄、不計入已接收筆數**，只保留最新值；超過 2 秒沒更新視為過期 |
+
+總傾斜角由 App 計算：`tilt = acos(cos(pitch) · cos(roll))`，0..180°。
+
+**Device Status**（Read / Notify）至少 4 bytes：
+
+| Byte | 內容 |
+| --- | --- |
+| 0 | 電量 %（uint8，0..100）；**`0xFF` = 未知**（例如沒接電池），App 顯示「電量 --」 |
+| 1..3 | 裝置端版本號（App 不使用） |
 
 ## 共通環境
 
