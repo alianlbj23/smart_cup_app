@@ -20,6 +20,9 @@ class FakeBleService implements BleService {
   final List<String?> scanCalls = [];
   final List<int> timeSyncs = [];
   int ackCount = 0;
+
+  /// readDeviceStatus() 回傳的狀態。
+  DeviceStatus deviceStatus = const DeviceStatus(batteryPercent: 80);
   int disconnectCount = 0;
 
   bool _scanning = false;
@@ -98,7 +101,7 @@ class FakeBleService implements BleService {
   @override
   Future<DeviceStatus> readDeviceStatus() async {
     _requireConnected();
-    return const DeviceStatus(batteryPercent: 80);
+    return deviceStatus;
   }
 
   void _requireConnected() {
@@ -113,6 +116,9 @@ class FakeBleService implements BleService {
 
   /// 模擬裝置推送任一種 Data Notify。
   void pushPacket(CupDataPacket packet) => _dataCtrl.add(packet);
+
+  /// 模擬裝置推送 Device Status Notify。
+  void pushStatus(DeviceStatus status) => _statusCtrl.add(status);
 
   /// 模擬意外斷線。
   void dropLink() {

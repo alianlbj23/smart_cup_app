@@ -5,6 +5,8 @@
 /// [BleService] 實作(目前為 `flutter_blue_plus_service.dart`)。
 library;
 
+import 'dart:math' as math;
+
 /// 掃描到的裝置。
 class BleDeviceInfo {
   const BleDeviceInfo({
@@ -40,8 +42,8 @@ enum BleConnectionState {
 
 /// Data Notify 封包(9-byte payload:type(1) + value(4) + timestamp(4))。
 ///
-/// 韌體 `main/ble_gatt_svr.h` 定義各 message type 的 value 編碼;
-/// 解碼在 `cup_protocol.dart`。
+/// 韌體(https://github.com/alianlbj23/smart_cup_firmware ,ESP-IDF)的
+/// `main/ble_gatt_svr.h` 定義各 message type 的 value 編碼;解碼在 `cup_protocol.dart`。
 sealed class CupDataPacket {
   const CupDataPacket({required this.timestamp});
 
@@ -114,7 +116,7 @@ enum CupPose {
       };
 }
 
-/// type 0x04:姿態(韌體尚未送出,先預留解碼)。
+/// type 0x04:姿態分類,每秒一次且姿態改變時立即送出。
 class PosePacket extends CupDataPacket {
   const PosePacket({
     required this.tiltDeciDegrees,
@@ -129,6 +131,37 @@ class PosePacket extends CupDataPacket {
   final bool moving;
 
   double get tiltDegrees => tiltDeciDegrees / 10;
+}
+
+/// type 0x05:即時姿態角,約每秒 5 次。
+///
+/// 屬即時資料:App 不回 ACK、不寫入接收紀錄,只保留最新一筆。
+/// 直立時 pitch 與 roll 皆約為 0。
+class AttitudePacket extends CupDataPacket {
+  const AttitudePacket({
+    required this.pitchDeciDegrees,
+    required this.rollDeciDegrees,
+    required super.timestamp,
+  });
+
+  /// 角度上下限(0.1 度):±180.0°。
+  static const int maxDeciDegrees = 1800;
+
+  /// 前後傾斜,單位 0.1 度,-1800..1800;正 = 杯口往前(遠離觀看者)。
+  final int pitchDeciDegrees;
+
+  /// 左右傾斜,單位 0.1 度,-1800..1800;正 = 杯口往右倒。
+  final int rollDeciDegrees;
+
+  double get pitchDegrees => pitchDeciDegrees / 10;
+  double get rollDegrees => rollDeciDegrees / 10;
+
+  /// 相對直立的總傾斜角 0..180 度:acos(cos(pitch)·cos(roll))。
+  double get tiltDegrees {
+    const toRad = math.pi / 180;
+    final c = math.cos(pitchDegrees * toRad) * math.cos(rollDegrees * toRad);
+    return math.acos(c.clamp(-1.0, 1.0)) / toRad;
+  }
 }
 
 /// 未知 message type:保留原始 value,不中斷資料流。
@@ -147,7 +180,10 @@ class UnknownPacket extends CupDataPacket {
 class DeviceStatus {
   const DeviceStatus({required this.batteryPercent});
 
-  final int batteryPercent;
+  /// 電量 0..100 %;未知(韌體送 0xFF,例如沒接電池)時為 null。
+  final int? batteryPercent;
+
+  bool get batteryKnown => batteryPercent != null;
 }
 
 enum BleErrorCode {

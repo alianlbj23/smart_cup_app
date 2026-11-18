@@ -5,7 +5,8 @@ import 'ble_service.dart';
 /// 智慧水杯 GATT Profile(規格書 §3)。與 BLE 套件無關,任何 [BleService] 實作共用。
 ///
 /// 以隨機產生的 128-bit UUID 為基底,第一段後 4 碼為 characteristic 編號,
-/// 韌體端 `firmware/smart_cup_esp32c6/smart_cup_esp32c6.ino` 必須使用相同值。
+/// 韌體端(https://github.com/alianlbj23/smart_cup_firmware ,ESP-IDF,
+/// `main/ble_gatt_svr.c` / `main/ble_gatt_svr.h`)必須使用相同值。
 class CupGatt {
   CupGatt._();
 
@@ -23,7 +24,7 @@ class CupGatt {
   /// App→ESP32,Write:Unix Timestamp。
   static const timeSync = '3c8b0002-efc1-4061-946c-e5916790df93';
 
-  /// ESP32→App,Notify:資料推送(水量 / 原始值 / 姿態)。
+  /// ESP32→App,Notify:資料推送(水量 / 原始值 / 姿態 / 即時姿態角)。
   static const dataNotify = '3c8b0003-efc1-4061-946c-e5916790df93';
 
   /// App→ESP32,Write:確認收到資料。
@@ -42,10 +43,14 @@ class CupProtocol {
   static const int msgTypeWater = 0x02;
   static const int msgTypeRaw = 0x03;
   static const int msgTypePose = 0x04;
+  static const int msgTypeAttitude = 0x05;
 
   static const int ackReceivedOk = 0x01;
 
   static const int deviceStatusLength = 4;
+
+  /// Device Status Byte 0 的特殊值:電量未知(例如沒接電池)。
+  static const int batteryUnknown = 0xFF;
 
   /// Time Sync:Byte 0-3 = Unix Timestamp (uint32 LE)。
   static List<int> encodeTimeSync(int unixTimestamp) {
@@ -58,10 +63,12 @@ class CupProtocol {
 
   /// Data Notify:type(1) + value(4) + timestamp(4) = 9 bytes。
   ///
-  /// value 的位元配置依 message type 而異(韌體 `main/ble_gatt_svr.h`):
-  /// - 0x02 WATER:bits 24..0 水量 25-bit 分數(0..2^25-1),bits 28..25 level 0..10
-  /// - 0x03 RAW  :濾波後電容計數
-  /// - 0x04 POSE :bits 15..0 傾斜角 0.1 度,bits 23..16 姿態,bits 31..24 移動
+  /// value 的位元配置依 message type 而異(韌體 smart_cup_firmware 的
+  /// `main/ble_gatt_svr.h`):
+  /// - 0x02 WATER   :bits 24..0 水量 25-bit 分數(0..2^25-1),bits 28..25 level 0..10
+  /// - 0x03 RAW     :濾波後電容計數
+  /// - 0x04 POSE    :bits 15..0 傾斜角 0.1 度,bits 23..16 姿態,bits 31..24 移動
+  /// - 0x05 ATTITUDE:bits 15..0 pitch、bits 31..16 roll,皆為 int16、0.1 度
   ///
   /// 長度不符時丟出 [FormatException];未知 type 回傳 [UnknownPacket]。
   static CupDataPacket decodeData(List<int> raw) {
@@ -93,13 +100,27 @@ class CupProtocol {
           moving: ((value >> 24) & 0xFF) != 0,
           timestamp: timestamp,
         );
+      case msgTypeAttitude:
+        return AttitudePacket(
+          pitchDeciDegrees: _attitudeAngle(value & 0xFFFF),
+          rollDeciDegrees: _attitudeAngle((value >> 16) & 0xFFFF),
+          timestamp: timestamp,
+        );
       default:
         return UnknownPacket(type: type, value: value, timestamp: timestamp);
     }
   }
 
+  /// 16-bit 欄位轉為有號角度(0.1 度),做 int16 符號延伸並夾在 ±1800。
+  static int _attitudeAngle(int bits16) => bits16
+      .toSigned(16)
+      .clamp(-AttitudePacket.maxDeciDegrees, AttitudePacket.maxDeciDegrees);
+
   /// Device Status(規格書未定義,本階段暫定格式,韌體需同步):
-  /// Byte 0 = 電量 %(uint8),Byte 1-3 = 裝置端版本號(App 不使用)。
+  /// Byte 0 = 電量 %(uint8,[batteryUnknown] 代表未知),
+  /// Byte 1-3 = 裝置端版本號(App 不使用)。
+  ///
+  /// 0..100 以外的電量值(含 0xFF)都視為未知,不會顯示成 255% 之類的數字。
   // TODO: 正式格式確定後更新。
   static DeviceStatus decodeDeviceStatus(List<int> raw) {
     if (raw.length < deviceStatusLength) {
@@ -107,6 +128,7 @@ class CupProtocol {
         'Device Status 長度至少 $deviceStatusLength bytes,實際 ${raw.length}',
       );
     }
-    return DeviceStatus(batteryPercent: raw[0]);
+    final battery = raw[0] & 0xFF;
+    return DeviceStatus(batteryPercent: battery <= 100 ? battery : null);
   }
 }

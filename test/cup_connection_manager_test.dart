@@ -194,6 +194,84 @@ void main() {
     expect(ble.ackCount, 2);
   });
 
+  test('Ready 時收到 ATTITUDE → 更新 latestAttitude,不 ACK、不進 log、不計數',
+      () async {
+    ble.devicesInRange = [_cup];
+    await manager.init();
+    await manager.connectTo(_cup);
+    await settle();
+
+    expect(manager.latestAttitude, isNull);
+    expect(manager.isAttitudeStale(DateTime.now()), isTrue);
+
+    var notified = 0;
+    manager.addListener(() => notified++);
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: -120, rollDeciDegrees: 300, timestamp: 5));
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: 10, rollDeciDegrees: -20, timestamp: 6));
+    await settle();
+
+    expect(notified, 2);
+    expect(manager.latestAttitude?.pitchDeciDegrees, 10);
+    expect(manager.latestAttitude?.rollDeciDegrees, -20);
+    expect(manager.latestAttitudeAt, isNotNull);
+    expect(manager.isAttitudeStale(DateTime.now()), isFalse);
+    expect(
+        manager.isAttitudeStale(DateTime.now()
+            .add(CupConnectionManager.attitudeStaleAfter * 2)),
+        isTrue);
+    expect(manager.receivedCount, 0);
+    expect(manager.log, isEmpty);
+    expect(ble.ackCount, 0);
+
+    // 其他封包照常計數與 ACK。
+    ble.pushPacket(const PosePacket(
+        tiltDeciDegrees: 300,
+        pose: CupPose.tilted,
+        moving: false,
+        timestamp: 7));
+    await settle();
+    expect(manager.receivedCount, 1);
+    expect(manager.log.single.packet, isA<PosePacket>());
+    expect(ble.ackCount, 1);
+    expect(manager.isPoseStale(DateTime.now()), isFalse);
+  });
+
+  test('斷線或忘記裝置 → latestAttitude 清除', () async {
+    await remember(_cup);
+    ble.devicesInRange = [_cup];
+    await manager.init();
+    await settle();
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: 0, rollDeciDegrees: 100, timestamp: 1));
+    await settle();
+    expect(manager.latestAttitude, isNotNull);
+
+    await manager.disconnect();
+    await settle();
+    expect(manager.latestAttitude, isNull);
+    expect(manager.latestAttitudeAt, isNull);
+
+    await manager.startAutoReconnect();
+    await settle();
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: 0, rollDeciDegrees: 100, timestamp: 2));
+    await settle();
+    expect(manager.latestAttitude, isNotNull);
+
+    await manager.forgetDevice();
+    await settle();
+    expect(manager.latestAttitude, isNull);
+  });
+
+  test('未連線時收到 ATTITUDE → 忽略', () async {
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: 0, rollDeciDegrees: 100, timestamp: 1));
+    await settle();
+    expect(manager.latestAttitude, isNull);
+  });
+
   test('忘記此裝置 → latestWater 清除', () async {
     ble.devicesInRange = [_cup];
     await manager.init();

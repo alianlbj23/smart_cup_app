@@ -88,6 +88,67 @@ void main() {
       expect(p.moving, isFalse);
     });
 
+    group('ATTITUDE', () {
+      // value = (roll << 16) | (pitch & 0xFFFF),皆為 int16 little-endian。
+      List<int> attitude(int pitch, int roll, [int ts = 7]) => [
+            0x05,
+            pitch & 0xFF, (pitch >> 8) & 0xFF,
+            roll & 0xFF, (roll >> 8) & 0xFF,
+            ts, 0, 0, 0,
+          ];
+
+      test('正值 pitch / roll 與時間戳', () {
+        final p = CupProtocol.decodeData(attitude(123, 456)) as AttitudePacket;
+        expect(p.pitchDeciDegrees, 123);
+        expect(p.rollDeciDegrees, 456);
+        expect(p.pitchDegrees, closeTo(12.3, 1e-9));
+        expect(p.rollDegrees, closeTo(45.6, 1e-9));
+        expect(p.timestamp, 7);
+      });
+
+      test('負值做 int16 符號延伸', () {
+        // pitch -15 = 0xFFF1,roll -300 = 0xFED4
+        final p = CupProtocol.decodeData(
+            [0x05, 0xF1, 0xFF, 0xD4, 0xFE, 0, 0, 0, 0]) as AttitudePacket;
+        expect(p.pitchDeciDegrees, -15);
+        expect(p.rollDeciDegrees, -300);
+        expect(p.rollDegrees, closeTo(-30.0, 1e-9));
+      });
+
+      test('邊界 ±1800,超出範圍被夾住', () {
+        final edge =
+            CupProtocol.decodeData(attitude(1800, -1800)) as AttitudePacket;
+        expect(edge.pitchDeciDegrees, 1800);
+        expect(edge.rollDeciDegrees, -1800);
+        final over =
+            CupProtocol.decodeData(attitude(0x7FFF, -0x8000)) as AttitudePacket;
+        expect(over.pitchDeciDegrees, 1800);
+        expect(over.rollDeciDegrees, -1800);
+      });
+
+      test('pitch 與 roll 互不干擾(-1 / 0)', () {
+        final p = CupProtocol.decodeData(attitude(-1, 0)) as AttitudePacket;
+        expect(p.pitchDeciDegrees, -1);
+        expect(p.rollDeciDegrees, 0);
+        final q = CupProtocol.decodeData(attitude(0, -1)) as AttitudePacket;
+        expect(q.pitchDeciDegrees, 0);
+        expect(q.rollDeciDegrees, -1);
+      });
+
+      test('總傾斜角 tilt = acos(cos(pitch)·cos(roll))', () {
+        AttitudePacket a(int pitch, int roll) => AttitudePacket(
+            pitchDeciDegrees: pitch, rollDeciDegrees: roll, timestamp: 0);
+        expect(a(0, 0).tiltDegrees, closeTo(0, 1e-9));
+        expect(a(0, -300).tiltDegrees, closeTo(30, 1e-9));
+        expect(a(450, 0).tiltDegrees, closeTo(45, 1e-9));
+        // cos60·cos60 = 0.25 -> acos(0.25) ≈ 75.52°
+        expect(a(600, 600).tiltDegrees, closeTo(75.5225, 1e-3));
+        expect(a(1800, 0).tiltDegrees, closeTo(180, 1e-9));
+        expect(a(1800, 1800).tiltDegrees, closeTo(0, 1e-6));
+        expect(a(-900, 0).tiltDegrees, closeTo(90, 1e-9));
+      });
+    });
+
     test('未知 message type 回傳 UnknownPacket 而不丟例外', () {
       final p = CupProtocol.decodeData(
           [0x7E, 0x01, 0x00, 0x00, 0x00, 0x05, 0, 0, 0]) as UnknownPacket;
@@ -129,7 +190,19 @@ void main() {
   test('Device Status 解析', () {
     final s = CupProtocol.decodeDeviceStatus([87, 0, 1, 2]);
     expect(s.batteryPercent, 87);
+    expect(s.batteryKnown, isTrue);
+    expect(CupProtocol.decodeDeviceStatus([0, 0, 0, 0]).batteryPercent, 0);
+    expect(CupProtocol.decodeDeviceStatus([100, 0, 0, 0]).batteryPercent, 100);
     expect(() => CupProtocol.decodeDeviceStatus([1, 2]),
         throwsFormatException);
+  });
+
+  test('Device Status:電量 0xFF 代表未知', () {
+    final s = CupProtocol.decodeDeviceStatus([0xFF, 0, 1, 2]);
+    expect(s.batteryPercent, isNull);
+    expect(s.batteryKnown, isFalse);
+    // 其他超出 0..100 的值同樣視為未知。
+    expect(
+        CupProtocol.decodeDeviceStatus([200, 0, 0, 0]).batteryKnown, isFalse);
   });
 }

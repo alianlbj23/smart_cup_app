@@ -61,6 +61,12 @@ class CupConnectionManager extends ChangeNotifier {
   /// 超過此時間沒收到 WATER 就視為過期(韌體每 1 秒送一次)。
   static const waterStaleAfter = Duration(seconds: 5);
 
+  /// 超過此時間沒收到 POSE 就視為過期(韌體每 1 秒送一次)。
+  static const poseStaleAfter = Duration(seconds: 5);
+
+  /// 超過此時間沒收到 ATTITUDE 就視為過期(韌體約每秒 5 次)。
+  static const attitudeStaleAfter = Duration(seconds: 2);
+
   final BleService _ble;
   final DeviceStore _store;
   late final List<StreamSubscription<Object?>> _subs;
@@ -81,6 +87,8 @@ class CupConnectionManager extends ChangeNotifier {
   DateTime? _latestWaterAt;
   PosePacket? _latestPose;
   DateTime? _latestPoseAt;
+  AttitudePacket? _latestAttitude;
+  DateTime? _latestAttitudeAt;
 
   /// [BleService.connect] 已完成,之後的斷線才算「連線中斷」。
   bool _linkUp = false;
@@ -112,15 +120,30 @@ class CupConnectionManager extends ChangeNotifier {
   /// 收到 [latestWater] 的手機時間。
   DateTime? get latestWaterAt => _latestWaterAt;
 
-  /// 最近一筆姿態;韌體尚未送出時為 null。
+  /// 最近一筆姿態分類(POSE);尚未收到或已換杯時為 null。
   PosePacket? get latestPose => _latestPose;
   DateTime? get latestPoseAt => _latestPoseAt;
 
+  /// 最近一筆即時姿態角(ATTITUDE);尚未收到、已斷線或已換杯時為 null。
+  AttitudePacket? get latestAttitude => _latestAttitude;
+
+  /// 收到 [latestAttitude] 的手機時間。
+  DateTime? get latestAttitudeAt => _latestAttitudeAt;
+
   /// [latestWater] 是否已超過 [waterStaleAfter] 沒更新。
-  bool isWaterStale(DateTime now) {
-    final at = _latestWaterAt;
-    return at == null || now.difference(at) > waterStaleAfter;
-  }
+  bool isWaterStale(DateTime now) =>
+      _isStale(_latestWaterAt, now, waterStaleAfter);
+
+  /// [latestPose] 是否已超過 [poseStaleAfter] 沒更新。
+  bool isPoseStale(DateTime now) =>
+      _isStale(_latestPoseAt, now, poseStaleAfter);
+
+  /// [latestAttitude] 是否已超過 [attitudeStaleAfter] 沒更新。
+  bool isAttitudeStale(DateTime now) =>
+      _isStale(_latestAttitudeAt, now, attitudeStaleAfter);
+
+  static bool _isStale(DateTime? at, DateTime now, Duration after) =>
+      at == null || now.difference(at) > after;
 
   /// App 啟動:有記憶裝置 → 自動重連;否則維持 Idle,由使用者為住民配對水杯。
   Future<void> init() async {
@@ -354,8 +377,13 @@ class CupConnectionManager extends ChangeNotifier {
   void _onData(CupDataPacket packet) {
     if (!_linkUp) return;
     final now = DateTime.now();
-    _receivedCount++;
     switch (packet) {
+      case AttitudePacket():
+        // 即時資料(約每秒 5 次):只保留最新值,不計數、不記錄、不回 ACK。
+        _latestAttitude = packet;
+        _latestAttitudeAt = now;
+        notifyListeners();
+        return;
       case WaterPacket():
         _latestWater = packet;
         _latestWaterAt = now;
@@ -365,6 +393,7 @@ class CupConnectionManager extends ChangeNotifier {
       case DummyDataPacket() || RawPacket() || UnknownPacket():
         break;
     }
+    _receivedCount++;
     _log.add(ReceivedPacket(packet, now, acked: false));
     if (_log.length > maxLogEntries) _log.removeAt(0);
     notifyListeners();
@@ -404,6 +433,8 @@ class CupConnectionManager extends ChangeNotifier {
     _deviceId = null;
     _deviceName = null;
     _deviceStatus = null;
+    // 即時姿態角只對目前連線有意義,斷線即清除。
+    _clearAttitude();
   }
 
   void _clearReadings() {
@@ -411,6 +442,12 @@ class CupConnectionManager extends ChangeNotifier {
     _latestWaterAt = null;
     _latestPose = null;
     _latestPoseAt = null;
+    _clearAttitude();
+  }
+
+  void _clearAttitude() {
+    _latestAttitude = null;
+    _latestAttitudeAt = null;
   }
 
   Future<void> _safeDisconnect() async {

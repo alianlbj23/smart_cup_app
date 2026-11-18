@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../state/cup_connection_manager.dart';
+import 'cup_attitude.dart';
 import 'cup_link.dart';
 import 'cup_reading.dart';
 import 'theme.dart';
 
-/// 水杯裝置:目前連線、水量/姿態與接收紀錄。App 一次連線一個水杯。
+/// 水杯裝置:目前連線、水量、姿態與接收紀錄。App 一次連線一個水杯。
 class CupPage extends StatelessWidget {
   const CupPage({super.key, required this.manager, required this.now});
 
@@ -21,6 +22,9 @@ class CupPage extends StatelessWidget {
         const SizedBox(height: 12),
         // 水位圖永遠顯示;未連線或資料過期時以灰色呈現。
         Panel(child: CupReading(manager: manager, now: now)),
+        const SizedBox(height: 12),
+        // 姿態面板同樣永遠顯示;未連線或資料過期時以灰色呈現。
+        Panel(child: CupAttitude(manager: manager, now: now)),
         const SizedBox(height: 12),
         _logPanel(),
       ],
@@ -38,7 +42,7 @@ class CupPage extends StatelessWidget {
     final cupId = m.activeDeviceId ?? remembered?.id;
     final cupName =
         m.activeDeviceId != null ? m.connectingName : remembered?.name;
-    final battery = m.deviceStatus?.batteryPercent;
+    final status = m.deviceStatus;
     return Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -63,7 +67,10 @@ class CupPage extends StatelessWidget {
                         [
                           cupDisplayName(cupName),
                           cupId,
-                          if (ready && battery != null) '電量 $battery%',
+                          if (ready && status != null)
+                            status.batteryPercent == null
+                                ? '電量 --'
+                                : '電量 ${status.batteryPercent}%',
                         ].join(' · '),
                         style: mutedSmall,
                       )
@@ -123,7 +130,7 @@ class CupPage extends StatelessWidget {
           const Text('水杯資料接收紀錄',
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
           Text(
-            '水量與姿態來自韌體;原始值僅供除錯 · '
+            '水量與姿態來自韌體;原始值僅供除錯;即時姿態角不列入 · '
             '已接收 ${manager.receivedCount} 筆',
             style: mutedSmall,
           ),

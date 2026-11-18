@@ -21,9 +21,9 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    // 水量是否過期隨時間變化,定期重算。
+    // 水量/姿態是否過期隨時間變化,定期重算(姿態 2 秒即過期,故每秒一次)。
     _refreshTimer = Timer.periodic(
-        const Duration(seconds: 5), (_) => setState(() {}));
+        const Duration(seconds: 1), (_) => setState(() {}));
   }
 
   @override

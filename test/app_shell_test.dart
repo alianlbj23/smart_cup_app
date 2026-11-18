@@ -79,6 +79,49 @@ void main() {
     expect(find.textContaining('已接收 1 筆'), findsOneWidget);
   });
 
+  testWidgets('電量未知(0xFF)→ 顯示「電量 --」', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+    ble.deviceStatus = const DeviceStatus(batteryPercent: null);
+    await pairCup(tester);
+
+    expect(find.textContaining('電量 --'), findsOneWidget);
+    expect(find.textContaining('255%'), findsNothing);
+
+    ble.pushStatus(const DeviceStatus(batteryPercent: 42));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('電量 42%'), findsOneWidget);
+  });
+
+  testWidgets('水杯姿態面板:未連線顯示 --,收到資料後顯示傾斜角與姿態標籤',
+      (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+
+    expect(find.text('水杯姿態'), findsOneWidget);
+    expect(find.text('傾斜 --'), findsOneWidget);
+    expect(find.text('pitch -- · roll --'), findsOneWidget);
+    expect(find.text('姿態 --'), findsOneWidget);
+
+    await pairCup(tester);
+    ble.pushPacket(const WaterPacket(
+        fill25: WaterPacket.fill25Max ~/ 2, level: 5, timestamp: 1));
+    ble.pushPacket(const PosePacket(
+        tiltDeciDegrees: 300,
+        pose: CupPose.drinking,
+        moving: true,
+        timestamp: 1));
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: 0, rollDeciDegrees: -300, timestamp: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.text('傾斜 30.0°'), findsOneWidget);
+    expect(find.text('pitch 0.0° · roll -30.0°'), findsOneWidget);
+    expect(find.widgetWithText(Chip, '飲用中'), findsOneWidget);
+    expect(find.widgetWithText(Chip, '移動中'), findsOneWidget);
+    // ATTITUDE 不算進接收紀錄。
+    expect(find.textContaining('已接收 2 筆'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('有記憶水杯 → 啟動自動重連,顯示中斷/配對其他/忘記', (tester) async {
     await pumpApp(tester, const Size(1400, 1000),
         remembered: _cup, inRange: [_cup]);
@@ -169,8 +212,19 @@ void main() {
   testWidgets('窄版(手機):連線後版面不溢位', (tester) async {
     await pumpApp(tester, const Size(390, 844));
     await pairCup(tester);
+    ble.pushPacket(const WaterPacket(
+        fill25: WaterPacket.fill25Max, level: 10, timestamp: 1));
+    ble.pushPacket(const PosePacket(
+        tiltDeciDegrees: 1700,
+        pose: CupPose.lying,
+        moving: false,
+        timestamp: 1));
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: 1700, rollDeciDegrees: -1750, timestamp: 1));
+    await tester.pumpAndSettle();
 
     expect(find.text('目前連線:已連線'), findsOneWidget);
+    expect(find.text('倒下'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

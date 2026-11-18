@@ -4,7 +4,9 @@ import '../services/ble_service.dart';
 import '../state/cup_connection_manager.dart';
 import 'theme.dart';
 
-/// 水杯目前水量(連續水位圖 + 數值)與姿態。資料直接取自韌體,不做換算。
+/// 水杯目前水量(連續水位圖 + 數值)。資料直接取自韌體,不做換算。
+///
+/// 姿態顯示在另一個面板(`cup_attitude.dart`)。
 class CupReading extends StatelessWidget {
   const CupReading({super.key, required this.manager, required this.now});
 
@@ -18,7 +20,6 @@ class CupReading extends StatelessWidget {
     final stale = !connected || manager.isWaterStale(now);
     final color = water == null || stale ? AppColors.muted : AppColors.teal;
     final updatedAt = manager.latestWaterAt;
-    final pose = manager.latestPose;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -33,15 +34,24 @@ class CupReading extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    water == null
-                        ? '--'
-                        : water.fillPercent.toStringAsFixed(4),
-                    style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w700,
-                        color: color,
-                        fontFeatures: const [FontFeature.tabularFigures()]),
+                  // 窄螢幕放不下時縮小字級,不溢位。
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        water == null
+                            ? '--'
+                            : water.fillPercent.toStringAsFixed(4),
+                        style: TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures()
+                            ]),
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 2),
                   Padding(
@@ -65,24 +75,6 @@ class CupReading extends StatelessWidget {
                                 '更新於 ${fmtTime(updatedAt!)}',
                 style: mutedSmall.copyWith(
                     color: stale && water != null ? AppColors.orange : null),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  const Icon(Icons.screen_rotation_alt,
-                      size: 15, color: AppColors.muted),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      pose == null
-                          ? '姿態 --'
-                          : '姿態 ${pose.pose.label} · '
-                              '傾斜 ${pose.tiltDegrees.toStringAsFixed(1)}° · '
-                              '${pose.moving ? '移動中' : '靜止'}',
-                      style: mutedSmall,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
@@ -145,6 +137,10 @@ String describePacket(CupDataPacket p) => switch (p) {
       PosePacket() =>
         '姿態 ${p.pose.label} · ${p.tiltDegrees.toStringAsFixed(1)}°'
             '${p.moving ? ' · 移動中' : ''}',
+      // 即時資料不會寫入接收紀錄,此處僅為 switch 完整性。
+      AttitudePacket() =>
+        '姿態角 pitch ${p.pitchDegrees.toStringAsFixed(1)}° · '
+            'roll ${p.rollDegrees.toStringAsFixed(1)}°',
       DummyDataPacket() => '測試值 ${p.value}',
       UnknownPacket() =>
         '未知 type 0x${p.type.toRadixString(16)} · ${p.value}',
