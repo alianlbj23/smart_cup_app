@@ -4,7 +4,30 @@
 
 - BLE：`flutter_blue_plus`（只在 [lib/services/flutter_blue_plus_service.dart](lib/services/flutter_blue_plus_service.dart) 使用）
 - 本地儲存：`shared_preferences`
-- 水杯韌體：[smart_cup_firmware](https://github.com/alianlbj23/smart_cup_firmware)（ESP-IDF，另一個 repo；BLE 程式在 `main/ble_gatt_svr.c` / `main/ble_gatt_svr.h`，不在本文件範圍）
+- 水杯韌體：[smart_cup_firmware](https://github.com/alianlbj23/smart_cup_firmware)（另一個 repo，見下方[水杯韌體](#水杯韌體)）
+
+## 水杯韌體
+
+水杯上跑的程式在另一個 repo：**[smart_cup_firmware](https://github.com/alianlbj23/smart_cup_firmware)**（ESP-IDF v6.1，XIAO ESP32-C6）。這個 App 只負責連線和顯示，水位、姿態都是韌體算好再送過來的。
+
+| 韌體負責 | 在韌體 repo 的哪裡 |
+| --- | --- |
+| 接線、燒錄步驟 | README 第 1、3 節 |
+| 水位校正（空杯、滿杯） | README 第 4 節，校正值在 `main/cup_state.c` |
+| BLE 協定、姿態判斷門檻 | README 第 5 節，程式在 `main/ble_gatt_svr.c` / `main/ble_gatt_svr.h` |
+| 不用 App 測試 BLE | `tools/ble_check.py` |
+
+使用順序：
+
+1. 照韌體 repo 的 README 燒錄韌體。杯子**直立放在桌上**再開機，開機時的姿態會被當成「直立」的零點。
+2. 韌體開始廣播 `SmartCup-XXXX`（XXXX 是 BLE 位址最後兩個 byte）。
+3. 打開這個 App，按「配對水杯」，選 `SmartCup-XXXX`。
+
+**改 BLE 協定時兩邊都要改**：App 的 [lib/services/cup_protocol.dart](lib/services/cup_protocol.dart)，以及韌體的 `main/ble_gatt_svr.c` / `.h`。
+
+| App | 對應的韌體 | 說明 |
+| --- | --- | --- |
+| `main`（2026-11-19 起） | `main`，韌體版本 0.2.0 | 支援 WATER、POSE、ATTITUDE（0x05）與電量未知（0xFF） |
 
 ## 快速試跑（不打包，直接執行）
 
@@ -159,6 +182,7 @@ flutter build web --release
 
 | 平台 | 狀態 |
 | --- | --- |
+| Linux | 已用 `flutter build linux --release` 編譯成功，並連實際水杯（韌體 0.2.0）驗證水位、姿態顯示與 90 秒連續傳輸（2026-11-19） |
 | Windows | 已用 `flutter build windows --release` 編譯成功（2026-10-29） |
 | Web | 已用 `flutter build web --release` 編譯成功（2026-10-29） |
-| Android / iOS / macOS / Linux | 還沒在本機編譯驗證 |
+| Android / iOS / macOS | 還沒在本機編譯驗證 |
