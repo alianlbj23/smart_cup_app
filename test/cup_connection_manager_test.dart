@@ -111,6 +111,52 @@ void main() {
       expect(manager.scanResults.single.deviceId, 'CC:DD');
     });
 
+    test('找不到記憶裝置(水杯休眠)→ 背景定期重試,醒來後自動連上', () async {
+      manager.dispose();
+      manager = CupConnectionManager(
+        ble: ble,
+        store: store,
+        backgroundRetryInterval: const Duration(milliseconds: 50),
+      );
+      await remember(_cup);
+      await manager.init();
+      await settle();
+      expect(manager.state, CupConnectionState.notFound);
+      expect(manager.message, contains('休眠'));
+
+      // 還在睡:再試一次仍然找不到,維持 notFound 並繼續排下一次
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await settle();
+      expect(manager.state, CupConnectionState.notFound);
+
+      // 水杯醒來開始廣播 → 下一次背景重試自動連上
+      ble.devicesInRange = [_cup];
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await settle();
+      expect(manager.state, CupConnectionState.ready);
+      expect(ble.connectCalls.single, 'AA:BB');
+    });
+
+    test('使用者主動中斷 → 不再背景重試', () async {
+      manager.dispose();
+      manager = CupConnectionManager(
+        ble: ble,
+        store: store,
+        backgroundRetryInterval: const Duration(milliseconds: 50),
+      );
+      await remember(_cup);
+      await manager.init();
+      await settle();
+      expect(manager.state, CupConnectionState.notFound);
+
+      await manager.disconnect();
+      ble.devicesInRange = [_cup];
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await settle();
+      expect(manager.state, CupConnectionState.idle);
+      expect(ble.connectCalls, isEmpty);
+    });
+
     test('記憶裝置連線失敗 → 重試 3 次後 notFound', () async {
       await remember(_cup);
       ble.devicesInRange = [_cup];

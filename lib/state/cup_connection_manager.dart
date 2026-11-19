@@ -40,8 +40,11 @@ class ReceivedPacket {
 /// 每個流程(掃描/連線/斷線)開始時遞增 [_session],非同步步驟完成後
 /// 若 session 已變更即放棄後續動作,避免使用者中途操作造成狀態錯亂。
 class CupConnectionManager extends ChangeNotifier {
-  CupConnectionManager({required BleService ble, DeviceStore? store})
-      : _ble = ble,
+  CupConnectionManager({
+    required BleService ble,
+    DeviceStore? store,
+    this.backgroundRetryInterval = const Duration(seconds: 20),
+  })  : _ble = ble,
         _store = store ?? DeviceStore() {
     _subs = [
       ble.connectionState.listen(_onBleState),
@@ -57,6 +60,13 @@ class CupConnectionManager extends ChangeNotifier {
   /// 自動重連流程中,連線/初始化連續失敗的重試上限。
   static const maxReconnectAttempts = 3;
   static const maxLogEntries = 50;
+
+  /// 找不到記憶的水杯([CupConnectionState.notFound])時,隔多久在背景再試一次。
+  ///
+  /// 水杯靜止一段時間會進入深度睡眠(韌體 smart_cup_firmware),拿起杯子才會醒來並
+  /// 廣播至少 30 秒;間隔要比這段時間短,醒來後才接得到。
+  final Duration backgroundRetryInterval;
+  Timer? _retryTimer;
 
   /// 超過此時間沒收到 WATER 就視為過期(韌體每 1 秒送一次)。
   static const waterStaleAfter = Duration(seconds: 5);
@@ -233,7 +243,8 @@ class CupConnectionManager extends ChangeNotifier {
     if (results.any((d) => d.deviceId == target.id)) {
       await _connect(target.id, target.name);
     } else {
-      _message = '找不到「${_displayName(target.name)}」,請確認裝置已開機並在附近';
+      _message = '找不到「${_displayName(target.name)}」:水杯可能在休眠,'
+          '拿起杯子就會自動重新連線';
       _setState(CupConnectionState.notFound);
     }
   }
@@ -423,6 +434,8 @@ class CupConnectionManager extends ChangeNotifier {
   /// 開始新流程:使先前流程的非同步延續失效並停止掃描。
   int _beginFlow() {
     final session = ++_session;
+    _retryTimer?.cancel(); // 任何新流程(含使用者操作)都取消背景重試
+    _retryTimer = null;
     _pairingScanActive = false;
     unawaited(_ble.stopScan().catchError((Object _) {}));
     return session;
@@ -461,7 +474,24 @@ class CupConnectionManager extends ChangeNotifier {
   void _setState(CupConnectionState s) {
     if (_disposed) return;
     _state = s;
+    if (s == CupConnectionState.notFound) _scheduleBackgroundRetry();
     notifyListeners();
+  }
+
+  /// notFound 且有記憶的水杯 → [backgroundRetryInterval] 後自動再定向掃描一次。
+  /// 水杯休眠時會一直重複,直到找到、使用者改做其他操作或 dispose。
+  void _scheduleBackgroundRetry() {
+    _retryTimer?.cancel();
+    if (_remembered == null) return;
+    _retryTimer = Timer(backgroundRetryInterval, () {
+      _retryTimer = null;
+      if (_disposed ||
+          _state != CupConnectionState.notFound ||
+          _remembered == null) {
+        return;
+      }
+      unawaited(startAutoReconnect());
+    });
   }
 
   static String _displayName(String name) => name.isEmpty ? '智慧水杯' : name;
@@ -475,6 +505,7 @@ class CupConnectionManager extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _session++;
+    _retryTimer?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
