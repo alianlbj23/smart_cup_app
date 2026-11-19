@@ -132,6 +132,99 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  /// 連線後推一組活動中的資料,再推 STATE=休眠(已休眠 75 秒)。
+  Future<void> pushDozing(WidgetTester tester) async {
+    ble.pushPacket(const WaterPacket(
+        fill25: WaterPacket.fill25Max ~/ 2, level: 5, timestamp: 1));
+    ble.pushPacket(const PosePacket(
+        tiltDeciDegrees: 20, pose: CupPose.upright, moving: false, timestamp: 1));
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: 10, rollDeciDegrees: -15, timestamp: 1));
+    await tester.pumpAndSettle();
+    ble.pushPacket(const StatePacket(
+        activity: CupActivity.dozing, secondsInState: 75, timestamp: 2));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('休眠:STATE=1 → 休眠橫幅、連線面板與各面板改顯示休眠;STATE=0 → 回復',
+      (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+    await pairCup(tester);
+    await pushDozing(tester);
+
+    // 休眠橫幅
+    expect(find.text('水杯休眠中'), findsOneWidget);
+    expect(find.text('藍牙保持連線 · 拿起杯子就會喚醒'), findsOneWidget);
+    expect(find.text('已休眠 1 分 15 秒'), findsOneWidget);
+    expect(find.byIcon(Icons.bedtime), findsWidgets);
+
+    // 連線面板:仍是已連線,只加註休眠中,不出現斷線/重新連線字樣
+    expect(find.text('目前連線:已連線 · 休眠中'), findsOneWidget);
+    expect(find.byIcon(Icons.bluetooth_connected), findsOneWidget);
+    expect(find.text('80%'), findsOneWidget);
+    expect(find.textContaining('斷線'), findsNothing);
+    expect(find.textContaining('重新連線'), findsNothing);
+
+    // 水位面板:照常顯示(不變灰)
+    expect(find.text('50.0000'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('50.0000')).style?.color,
+        AppColors.teal);
+    expect(find.textContaining('休眠中 · 每 30 秒更新 · 更新於'), findsOneWidget);
+    expect(find.textContaining('資料過期'), findsNothing);
+
+    // 姿態面板:「休眠中」Chip 取代即時 Chip,不顯示姿態資料過期
+    expect(find.widgetWithText(Chip, '休眠中'), findsOneWidget);
+    expect(find.widgetWithText(Chip, '直立'), findsNothing);
+    expect(find.widgetWithText(Chip, '靜止'), findsNothing);
+    expect(find.text('休眠中 · 拿起杯子後恢復即時姿態'), findsOneWidget);
+    expect(find.textContaining('姿態資料過期'), findsNothing);
+    expect(find.text('傾斜 1.8°'), findsOneWidget);
+
+    // 接收紀錄
+    expect(find.text('水杯休眠中 · 已休眠 1 分 15 秒'), findsOneWidget);
+    expect(find.textContaining('已接收 3 筆'), findsOneWidget);
+
+    // 喚醒 → 回到一般畫面
+    ble.pushPacket(const StatePacket(
+        activity: CupActivity.active, secondsInState: 0, timestamp: 3));
+    ble.pushPacket(const PosePacket(
+        tiltDeciDegrees: 20, pose: CupPose.upright, moving: true, timestamp: 3));
+    ble.pushPacket(const AttitudePacket(
+        pitchDeciDegrees: 10, rollDeciDegrees: -15, timestamp: 3));
+    await tester.pumpAndSettle();
+
+    expect(find.text('水杯休眠中'), findsNothing);
+    expect(find.textContaining('已休眠 1 分'), findsOneWidget,
+        reason: '只剩接收紀錄那一行');
+    expect(find.text('目前連線:已連線'), findsOneWidget);
+    expect(find.widgetWithText(Chip, '休眠中'), findsNothing);
+    expect(find.widgetWithText(Chip, '直立'), findsOneWidget);
+    expect(find.widgetWithText(Chip, '移動中'), findsOneWidget);
+    expect(find.textContaining('即時姿態 · 更新於'), findsOneWidget);
+    expect(find.text('水杯已喚醒'), findsOneWidget);
+    expect(find.textContaining('資料過期'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('窄版(手機):休眠中版面不溢位', (tester) async {
+    await pumpApp(tester, const Size(390, 844));
+    // 低電量:電量標示與「已連線 · 休眠中」同一列,字最多。
+    ble.deviceStatus = const DeviceStatus(batteryPercent: 15);
+    await pairCup(tester);
+    await pushDozing(tester);
+
+    expect(find.text('水杯休眠中'), findsOneWidget);
+    expect(find.text('目前連線:已連線 · 休眠中'), findsOneWidget);
+    expect(find.text('15%'), findsOneWidget);
+    expect(find.widgetWithText(Chip, '休眠中'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    // 寬度只有 320 也不溢位。
+    tester.view.physicalSize = const Size(320, 700);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('有記憶水杯 → 啟動自動重連,顯示中斷/配對其他/忘記', (tester) async {
     await pumpApp(tester, const Size(1400, 1000),
         remembered: _cup, inRange: [_cup]);

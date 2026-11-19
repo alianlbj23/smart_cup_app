@@ -149,6 +149,63 @@ void main() {
       });
     });
 
+    group('STATE', () {
+      // value = (secondsInState << 8) | state,uint32 little-endian。
+      List<int> state(int code, int seconds, [int ts = 9]) {
+        final v = ((seconds & 0xFFFFFF) << 8) | (code & 0xFF);
+        return [
+          0x06,
+          v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF,
+          ts, 0, 0, 0,
+        ];
+      }
+
+      test('0 = 活動中、1 = 休眠中,並帶秒數與時間戳', () {
+        final active = CupProtocol.decodeData(state(0, 0)) as StatePacket;
+        expect(active.activity, CupActivity.active);
+        expect(active.secondsInState, 0);
+        expect(active.timestamp, 9);
+
+        final dozing = CupProtocol.decodeData(state(1, 75)) as StatePacket;
+        expect(dozing.activity, CupActivity.dozing);
+        expect(dozing.secondsInState, 75);
+      });
+
+      test('其他狀態值視為未知,秒數照樣解出', () {
+        for (final code in [2, 0x7F, 0xFF]) {
+          final p = CupProtocol.decodeData(state(code, 10)) as StatePacket;
+          expect(p.activity, CupActivity.unknown, reason: 'code $code');
+          expect(p.secondsInState, 10);
+        }
+      });
+
+      test('秒數 24-bit 邊界:最大值不溢位、不影響狀態位元', () {
+        final max = CupProtocol.decodeData(
+            [0x06, 0x01, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0]) as StatePacket;
+        expect(max.activity, CupActivity.dozing);
+        expect(max.secondsInState, StatePacket.maxSecondsInState);
+        expect(max.secondsInState, 0xFFFFFF);
+
+        // 只有 bit 8 = 1 秒;bits 7..0 = 0 仍是活動中。
+        final one = CupProtocol.decodeData(
+            [0x06, 0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0]) as StatePacket;
+        expect(one.activity, CupActivity.active);
+        expect(one.secondsInState, 1);
+
+        // 只有最高位元(bit 31)= 2^23 秒。
+        final top = CupProtocol.decodeData(
+            [0x06, 0x00, 0x00, 0x00, 0x80, 0, 0, 0, 0]) as StatePacket;
+        expect(top.secondsInState, 0x800000);
+        expect(top.activity, CupActivity.active);
+      });
+
+      test('中文標籤', () {
+        expect(CupActivity.active.label, '活動中');
+        expect(CupActivity.dozing.label, '休眠中');
+        expect(CupActivity.unknown.label, '未知');
+      });
+    });
+
     test('未知 message type 回傳 UnknownPacket 而不丟例外', () {
       final p = CupProtocol.decodeData(
           [0x7E, 0x01, 0x00, 0x00, 0x00, 0x05, 0, 0, 0]) as UnknownPacket;

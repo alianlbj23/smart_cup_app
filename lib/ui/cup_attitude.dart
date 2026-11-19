@@ -15,7 +15,8 @@ const _rollSignThreshold = 1.0;
 /// 「水杯姿態」面板內容:杯子側視圖、水平儀(俯視)、傾斜角數值與姿態標籤。
 ///
 /// 姿態角來自 ATTITUDE(0x05),姿態分類與移動旗標來自 POSE(0x04),
-/// 杯內水量取最新 WATER(0x02)。未連線或資料過期時以灰色呈現。
+/// 杯內水量取最新 WATER(0x02)。未連線或資料過期時以灰色呈現;
+/// 水杯休眠中(STATE 0x06)韌體不送姿態,改以柔和的夜間色顯示最後的姿態。
 class CupAttitude extends StatelessWidget {
   const CupAttitude({super.key, required this.manager, required this.now});
 
@@ -25,15 +26,20 @@ class CupAttitude extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final connected = manager.state == CupConnectionState.ready;
+    final dozing = connected && manager.isDozing(now);
     final attitude = manager.latestAttitude;
     final attitudeStale = !connected || manager.isAttitudeStale(now);
-    final color = attitude == null || attitudeStale
+    final color = dozing
+        ? AppColors.nightMuted
+        : attitude == null || attitudeStale
         ? AppColors.muted
         : AppColors.teal;
 
     final water = manager.latestWater;
     final waterStale = !connected || manager.isWaterStale(now);
-    final waterColor = water == null || waterStale
+    final waterColor = dozing
+        ? AppColors.nightMuted
+        : water == null || waterStale
         ? AppColors.muted
         : AppColors.teal;
 
@@ -43,6 +49,8 @@ class CupAttitude extends StatelessWidget {
     final updatedAt = manager.latestAttitudeAt;
     final status = !connected
         ? '水杯未連線'
+        : dozing
+        ? '休眠中 · 拿起杯子後恢復即時姿態'
         : attitude == null
         ? '已連線,等待姿態資料…'
         : attitudeStale
@@ -59,7 +67,9 @@ class CupAttitude extends StatelessWidget {
         Text(
           status,
           style: mutedSmall.copyWith(
-            color: connected && attitudeStale && attitude != null
+            color: dozing
+                ? AppColors.night
+                : connected && attitudeStale && attitude != null
                 ? AppColors.orange
                 : null,
           ),
@@ -75,9 +85,7 @@ class CupAttitude extends StatelessWidget {
               CupTiltView(
                 angleDegrees: attitude == null ? 0 : cupSideAngle(attitude),
                 fillFraction: water?.fillFraction ?? 0,
-                outlineColor: color == AppColors.muted
-                    ? AppColors.muted
-                    : AppColors.ink,
+                outlineColor: color == AppColors.teal ? AppColors.ink : color,
                 waterColor: waterColor,
               ),
             ),
@@ -89,7 +97,7 @@ class CupAttitude extends StatelessWidget {
                 color: color,
               ),
             ),
-            _readout(attitude, color, pose, poseStale),
+            _readout(attitude, color, pose, poseStale, dozing: dozing),
           ],
         ),
       ],
@@ -109,8 +117,9 @@ class CupAttitude extends StatelessWidget {
     AttitudePacket? attitude,
     Color color,
     PosePacket? pose,
-    bool poseStale,
-  ) {
+    bool poseStale, {
+    required bool dozing,
+  }) {
     const figures = [FontFeature.tabularFigures()];
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -144,24 +153,33 @@ class CupAttitude extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _chip(
-              icon: Icons.local_drink_outlined,
-              label: pose == null ? '姿態 --' : pose.pose.label,
-              color: pose == null || poseStale
-                  ? AppColors.muted
-                  : _poseColor(pose.pose),
-            ),
-            _chip(
-              icon: pose?.moving ?? false
-                  ? Icons.vibration
-                  : Icons.pause_circle_outline,
-              label: pose == null ? '移動 --' : (pose.moving ? '移動中' : '靜止'),
-              color: pose == null || poseStale
-                  ? AppColors.muted
-                  : pose.moving
-                  ? AppColors.orange
-                  : AppColors.teal,
-            ),
+            // 休眠中沒有即時姿態:以單一「休眠中」Chip 取代姿態/移動 Chip。
+            if (dozing)
+              _chip(
+                icon: Icons.bedtime,
+                label: CupActivity.dozing.label,
+                color: AppColors.night,
+              )
+            else ...[
+              _chip(
+                icon: Icons.local_drink_outlined,
+                label: pose == null ? '姿態 --' : pose.pose.label,
+                color: pose == null || poseStale
+                    ? AppColors.muted
+                    : _poseColor(pose.pose),
+              ),
+              _chip(
+                icon: pose?.moving ?? false
+                    ? Icons.vibration
+                    : Icons.pause_circle_outline,
+                label: pose == null ? '移動 --' : (pose.moving ? '移動中' : '靜止'),
+                color: pose == null || poseStale
+                    ? AppColors.muted
+                    : pose.moving
+                    ? AppColors.orange
+                    : AppColors.teal,
+              ),
+            ],
           ],
         ),
       ],

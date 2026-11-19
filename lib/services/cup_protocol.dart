@@ -24,7 +24,7 @@ class CupGatt {
   /// App→ESP32,Write:Unix Timestamp。
   static const timeSync = '3c8b0002-efc1-4061-946c-e5916790df93';
 
-  /// ESP32→App,Notify:資料推送(水量 / 原始值 / 姿態 / 即時姿態角)。
+  /// ESP32→App,Notify:資料推送(水量 / 原始值 / 姿態 / 即時姿態角 / 活動狀態)。
   static const dataNotify = '3c8b0003-efc1-4061-946c-e5916790df93';
 
   /// App→ESP32,Write:確認收到資料。
@@ -44,6 +44,7 @@ class CupProtocol {
   static const int msgTypeRaw = 0x03;
   static const int msgTypePose = 0x04;
   static const int msgTypeAttitude = 0x05;
+  static const int msgTypeState = 0x06;
 
   static const int ackReceivedOk = 0x01;
 
@@ -69,6 +70,7 @@ class CupProtocol {
   /// - 0x03 RAW     :濾波後電容計數
   /// - 0x04 POSE    :bits 15..0 傾斜角 0.1 度,bits 23..16 姿態,bits 31..24 移動
   /// - 0x05 ATTITUDE:bits 15..0 pitch、bits 31..16 roll,皆為 int16、0.1 度
+  /// - 0x06 STATE   :bits 7..0 狀態(0 活動中 / 1 休眠中),bits 31..8 進入該狀態秒數(uint24)
   ///
   /// 長度不符時丟出 [FormatException];未知 type 回傳 [UnknownPacket]。
   static CupDataPacket decodeData(List<int> raw) {
@@ -104,6 +106,12 @@ class CupProtocol {
         return AttitudePacket(
           pitchDeciDegrees: _attitudeAngle(value & 0xFFFF),
           rollDeciDegrees: _attitudeAngle((value >> 16) & 0xFFFF),
+          timestamp: timestamp,
+        );
+      case msgTypeState:
+        return StatePacket(
+          activity: CupActivity.fromCode(value & 0xFF),
+          secondsInState: (value >> 8) & StatePacket.maxSecondsInState,
           timestamp: timestamp,
         );
       default:

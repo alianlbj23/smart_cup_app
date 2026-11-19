@@ -17,6 +17,8 @@ class CupReading extends StatelessWidget {
   Widget build(BuildContext context) {
     final water = manager.latestWater;
     final connected = manager.state == CupConnectionState.ready;
+    // 休眠中杯子靜止、水位仍可信:照常顯示(isWaterStale 在休眠中不算過期)。
+    final dozing = connected && manager.isDozing(now);
     final stale = !connected || manager.isWaterStale(now);
     final color = water == null || stale ? AppColors.muted : AppColors.teal;
     final updatedAt = manager.latestWaterAt;
@@ -67,6 +69,11 @@ class CupReading extends StatelessWidget {
                     ? (water == null
                         ? '水杯未連線'
                         : '水杯未連線 · 最後更新 ${fmtTime(updatedAt!)}')
+                    : dozing
+                        ? (water == null
+                            ? '休眠中 · 等待水量(每 30 秒更新)'
+                            : '休眠中 · 每 30 秒更新 · '
+                                '更新於 ${fmtTime(updatedAt!)}')
                     : water == null
                         ? '已連線,等待第一筆水量…'
                         : stale
@@ -74,7 +81,11 @@ class CupReading extends StatelessWidget {
                             : 'fill25 ${water.fill25} · 刻度 ${water.level} · '
                                 '更新於 ${fmtTime(updatedAt!)}',
                 style: mutedSmall.copyWith(
-                    color: stale && water != null ? AppColors.orange : null),
+                    color: dozing
+                        ? AppColors.night
+                        : stale && water != null
+                            ? AppColors.orange
+                            : null),
               ),
             ],
           ),
@@ -141,7 +152,23 @@ String describePacket(CupDataPacket p) => switch (p) {
       AttitudePacket() =>
         '姿態角 pitch ${p.pitchDegrees.toStringAsFixed(1)}° · '
             'roll ${p.rollDegrees.toStringAsFixed(1)}°',
+      StatePacket() => describeState(p),
       DummyDataPacket() => '測試值 ${p.value}',
       UnknownPacket() =>
         '未知 type 0x${p.type.toRadixString(16)} · ${p.value}',
     };
+
+/// STATE 封包在接收紀錄的文字:剛切換時寫「進入休眠」/「已喚醒」,
+/// 之後的 keepalive(或訂閱時的狀態回報)附上已持續的時間。
+String describeState(StatePacket p) {
+  // 韌體在狀態改變時立即送,秒數可能已進位到 1。
+  final justChanged = p.secondsInState <= 1;
+  final since = fmtDuration(Duration(seconds: p.secondsInState));
+  return switch (p.activity) {
+    CupActivity.dozing =>
+      justChanged ? '水杯進入休眠' : '水杯休眠中 · 已休眠 $since',
+    CupActivity.active =>
+      justChanged ? '水杯已喚醒' : '水杯活動中 · 已持續 $since',
+    CupActivity.unknown => '水杯狀態未知 · 已持續 $since',
+  };
+}

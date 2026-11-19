@@ -5,6 +5,7 @@ import 'battery_badge.dart';
 import 'cup_attitude.dart';
 import 'cup_link.dart';
 import 'cup_reading.dart';
+import 'doze_banner.dart';
 import 'theme.dart';
 
 /// 水杯裝置:目前連線、水量、姿態與接收紀錄。App 一次連線一個水杯。
@@ -14,14 +15,45 @@ class CupPage extends StatelessWidget {
   final CupConnectionManager manager;
   final DateTime now;
 
+  /// 休眠橫幅出現/消失的淡入淡出時間。
+  static const dozeTransition = Duration(milliseconds: 350);
+
+  bool get _ready => manager.state == CupConnectionState.ready;
+
   @override
   Widget build(BuildContext context) {
+    final dozing = _ready && manager.isDozing(now);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _connectionPanel(context),
+        _connectionPanel(context, dozing: dozing),
         const SizedBox(height: 12),
-        // 水位圖永遠顯示;未連線或資料過期時以灰色呈現。
+        // 連線且休眠中:醒目的休眠橫幅,進入/離開時淡入淡出並展開/收合。
+        AnimatedSwitcher(
+          duration: dozeTransition,
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: SizeTransition(
+              sizeFactor: animation,
+              alignment: Alignment.topCenter,
+              child: child,
+            ),
+          ),
+          layoutBuilder: (current, previous) => Stack(
+            alignment: Alignment.topCenter,
+            children: [...previous, ?current],
+          ),
+          child: dozing
+              ? Padding(
+                  key: const ValueKey('doze-banner'),
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: DozeBanner(dozingFor: manager.dozingFor(now)),
+                )
+              : const SizedBox(key: ValueKey('awake'), width: double.infinity),
+        ),
+        // 水位圖永遠顯示;未連線或資料過期時以灰色呈現(休眠中照常顯示)。
         Panel(child: CupReading(manager: manager, now: now)),
         const SizedBox(height: 12),
         // 姿態面板同樣永遠顯示;未連線或資料過期時以灰色呈現。
@@ -32,9 +64,9 @@ class CupPage extends StatelessWidget {
     );
   }
 
-  Widget _connectionPanel(BuildContext context) {
+  Widget _connectionPanel(BuildContext context, {required bool dozing}) {
     final m = manager;
-    final ready = m.state == CupConnectionState.ready;
+    final ready = _ready;
     final busy = m.state == CupConnectionState.scanning ||
         m.state == CupConnectionState.connecting ||
         m.state == CupConnectionState.connected ||
@@ -60,9 +92,21 @@ class CupPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('目前連線:${cupStateLabel(m.state)}',
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600)),
+                    // 休眠中連線仍保持,只在狀態後面加註「休眠中」。
+                    Text.rich(
+                      TextSpan(
+                        text: '目前連線:${cupStateLabel(m.state)}',
+                        children: [
+                          if (dozing)
+                            const TextSpan(
+                              text: ' · 休眠中',
+                              style: TextStyle(color: AppColors.night),
+                            ),
+                        ],
+                      ),
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w600),
+                    ),
                     if (cupId != null)
                       Text(
                         '${cupDisplayName(cupName)} · $cupId',
@@ -129,7 +173,7 @@ class CupPage extends StatelessWidget {
           const Text('水杯資料接收紀錄',
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
           Text(
-            '水量與姿態來自韌體;原始值僅供除錯;即時姿態角不列入 · '
+            '水量、姿態與休眠狀態來自韌體;原始值僅供除錯;即時姿態角不列入 · '
             '已接收 ${manager.receivedCount} 筆',
             style: mutedSmall,
           ),

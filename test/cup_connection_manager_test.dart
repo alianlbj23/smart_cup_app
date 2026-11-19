@@ -311,6 +311,138 @@ void main() {
     expect(manager.latestAttitude, isNull);
   });
 
+  group('休眠狀態(STATE)', () {
+    const dozing = StatePacket(
+        activity: CupActivity.dozing, secondsInState: 30, timestamp: 1);
+    const awake = StatePacket(
+        activity: CupActivity.active, secondsInState: 0, timestamp: 2);
+
+    Future<void> connect() async {
+      await remember(_cup);
+      ble.devicesInRange = [_cup];
+      await manager.init();
+      await settle();
+      expect(manager.state, CupConnectionState.ready);
+    }
+
+    test('STATE → 回 ACK、進接收紀錄、計數並更新 latestState', () async {
+      await connect();
+      expect(manager.latestState, isNull);
+      expect(manager.isDozing(DateTime.now()), isFalse);
+
+      ble.pushPacket(dozing);
+      await settle();
+
+      expect(manager.receivedCount, 1);
+      expect(manager.log.single.packet, same(dozing));
+      expect(manager.log.single.acked, isTrue);
+      expect(ble.ackCount, 1);
+      expect(manager.latestState, same(dozing));
+      expect(manager.latestStateAt, isNotNull);
+      expect(manager.isDozing(DateTime.now()), isTrue);
+
+      ble.pushPacket(awake);
+      await settle();
+      expect(manager.receivedCount, 2);
+      expect(ble.ackCount, 2);
+      expect(manager.latestState, same(awake));
+      expect(manager.isDozing(DateTime.now()), isFalse);
+      expect(manager.dozingFor(DateTime.now()), isNull);
+    });
+
+    test('isDozing 在收到後 25 秒內有效,之後失效;dozingFor 加上經過時間',
+        () async {
+      await connect();
+      ble.pushPacket(dozing);
+      await settle();
+      final at = manager.latestStateAt!;
+
+      expect(manager.isDozing(at.add(const Duration(seconds: 25))), isTrue);
+      expect(manager.isDozing(at.add(const Duration(seconds: 26))), isFalse);
+      expect(manager.dozingFor(at), const Duration(seconds: 30));
+      expect(manager.dozingFor(at.add(const Duration(seconds: 12))),
+          const Duration(seconds: 42));
+      expect(manager.dozingFor(at.add(const Duration(seconds: 26))), isNull);
+    });
+
+    test('休眠中水位不算過期;keepalive 中斷後回到一般過期判斷', () async {
+      await connect();
+      ble.pushPacket(const WaterPacket(fill25: 1000, level: 1, timestamp: 1));
+      ble.pushPacket(dozing);
+      await settle();
+      final at = manager.latestStateAt!;
+
+      // WATER 30 秒才一筆:休眠中不算過期。
+      final later = at.add(const Duration(seconds: 20));
+      expect(manager.isWaterStale(later), isFalse);
+      // 休眠中不送姿態,姿態本身仍是過期的(由 UI 改顯示休眠)。
+      expect(manager.isPoseStale(later), isTrue);
+      // 25 秒沒收到 keepalive → 不再當休眠,水位照一般規則過期。
+      expect(manager.isWaterStale(at.add(const Duration(seconds: 26))),
+          isTrue);
+    });
+
+    test('喚醒當下不會閃「資料過期」:從喚醒時刻起算過期', () async {
+      await connect();
+      ble.pushPacket(const WaterPacket(fill25: 1000, level: 1, timestamp: 1));
+      await settle();
+      final waterAt = manager.latestWaterAt!;
+      expect(manager.isWaterStale(waterAt.add(const Duration(seconds: 6))),
+          isTrue);
+
+      ble.pushPacket(awake);
+      await settle();
+      final wokeAt = manager.latestStateAt!;
+      expect(manager.isWaterStale(wokeAt.add(const Duration(seconds: 2))),
+          isFalse);
+      expect(manager.isWaterStale(wokeAt.add(const Duration(seconds: 6))),
+          isTrue);
+      // 從沒收過的資料仍視為沒有資料。
+      expect(manager.isPoseStale(wokeAt), isTrue);
+    });
+
+    test('主動斷線、意外斷線、換杯、忘記水杯 → latestState 清除', () async {
+      await connect();
+      ble.pushPacket(dozing);
+      await settle();
+      expect(manager.latestState, isNotNull);
+
+      await manager.disconnect();
+      await settle();
+      expect(manager.latestState, isNull);
+      expect(manager.latestStateAt, isNull);
+      expect(manager.isDozing(DateTime.now()), isFalse);
+
+      await manager.startAutoReconnect();
+      await settle();
+      ble.pushPacket(dozing);
+      await settle();
+      expect(manager.isDozing(DateTime.now()), isTrue);
+
+      // 意外斷線後自動重連回 Ready,休眠狀態不沿用(等韌體重送)。
+      ble.dropLink();
+      await settle();
+      expect(manager.state, CupConnectionState.ready);
+      expect(manager.latestState, isNull);
+      expect(manager.isDozing(DateTime.now()), isFalse);
+
+      ble.pushPacket(dozing);
+      await settle();
+      ble.devicesInRange = [_cup, _other];
+      await manager.reconnectTo(
+          RememberedDevice(id: _other.deviceId, name: _other.deviceName));
+      await settle();
+      expect(manager.activeDeviceId, 'CC:DD');
+      expect(manager.latestState, isNull);
+
+      ble.pushPacket(dozing);
+      await settle();
+      await manager.forgetDevice();
+      await settle();
+      expect(manager.latestState, isNull);
+    });
+  });
+
   test('未連線時收到 ATTITUDE → 忽略', () async {
     ble.pushPacket(const AttitudePacket(
         pitchDeciDegrees: 0, rollDeciDegrees: 100, timestamp: 1));

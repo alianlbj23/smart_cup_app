@@ -77,6 +77,10 @@ class CupConnectionManager extends ChangeNotifier {
   /// 超過此時間沒收到 ATTITUDE 就視為過期(韌體約每秒 5 次)。
   static const attitudeStaleAfter = Duration(seconds: 2);
 
+  /// 休眠中韌體每 10 秒送一次 STATE keepalive;超過此時間(約 3 次)沒收到
+  /// 就不再當作休眠中,回到一般的過期判斷。
+  static const dozeKeepaliveTimeout = Duration(seconds: 25);
+
   final BleService _ble;
   final DeviceStore _store;
   late final List<StreamSubscription<Object?>> _subs;
@@ -99,6 +103,8 @@ class CupConnectionManager extends ChangeNotifier {
   DateTime? _latestPoseAt;
   AttitudePacket? _latestAttitude;
   DateTime? _latestAttitudeAt;
+  StatePacket? _latestState;
+  DateTime? _latestStateAt;
 
   /// [BleService.connect] 已完成,之後的斷線才算「連線中斷」。
   bool _linkUp = false;
@@ -140,17 +146,61 @@ class CupConnectionManager extends ChangeNotifier {
   /// 收到 [latestAttitude] 的手機時間。
   DateTime? get latestAttitudeAt => _latestAttitudeAt;
 
+  /// 最近一筆水杯活動狀態(STATE);尚未收到、已斷線或已換杯時為 null。
+  StatePacket? get latestState => _latestState;
+
+  /// 收到 [latestState] 的手機時間。
+  DateTime? get latestStateAt => _latestStateAt;
+
+  /// 水杯是否休眠中:最新 STATE 為休眠,且收到它到 [now] 不超過
+  /// [dozeKeepaliveTimeout]。
+  bool isDozing(DateTime now) {
+    final state = _latestState, at = _latestStateAt;
+    return state != null &&
+        at != null &&
+        state.activity == CupActivity.dozing &&
+        now.difference(at) <= dozeKeepaliveTimeout;
+  }
+
+  /// 已休眠多久:封包的 secondsInState 加上收到後經過的時間;
+  /// 不在休眠中([isDozing] 為 false)時為 null。
+  Duration? dozingFor(DateTime now) {
+    if (!isDozing(now)) return null;
+    final elapsed = now.difference(_latestStateAt!);
+    return Duration(seconds: _latestState!.secondsInState) +
+        (elapsed.isNegative ? Duration.zero : elapsed);
+  }
+
   /// [latestWater] 是否已超過 [waterStaleAfter] 沒更新。
-  bool isWaterStale(DateTime now) =>
-      _isStale(_latestWaterAt, now, waterStaleAfter);
+  ///
+  /// 休眠中 WATER 約 30 秒才一筆,屬正常,只要有資料就不算過期。
+  bool isWaterStale(DateTime now) {
+    if (_latestWaterAt != null && isDozing(now)) return false;
+    return _isStale(_freshSince(_latestWaterAt), now, waterStaleAfter);
+  }
 
   /// [latestPose] 是否已超過 [poseStaleAfter] 沒更新。
+  ///
+  /// 休眠中韌體不送 POSE,此值會變成 true;UI 應先看 [isDozing]。
   bool isPoseStale(DateTime now) =>
-      _isStale(_latestPoseAt, now, poseStaleAfter);
+      _isStale(_freshSince(_latestPoseAt), now, poseStaleAfter);
 
   /// [latestAttitude] 是否已超過 [attitudeStaleAfter] 沒更新。
+  ///
+  /// 休眠中韌體不送 ATTITUDE,此值會變成 true;UI 應先看 [isDozing]。
   bool isAttitudeStale(DateTime now) =>
-      _isStale(_latestAttitudeAt, now, attitudeStaleAfter);
+      _isStale(_freshSince(_latestAttitudeAt), now, attitudeStaleAfter);
+
+  /// 過期判斷的起算時間:剛收到「活動中」STATE(喚醒)時,從喚醒那一刻起算,
+  /// 給韌體恢復即時推送的時間,避免喚醒瞬間閃一下「資料過期」。
+  /// 尚未收到過資料([at] 為 null)仍視為沒有資料。
+  DateTime? _freshSince(DateTime? at) {
+    final wokeAt = _latestState?.activity == CupActivity.active
+        ? _latestStateAt
+        : null;
+    if (at == null || wokeAt == null || wokeAt.isBefore(at)) return at;
+    return wokeAt;
+  }
 
   static bool _isStale(DateTime? at, DateTime now, Duration after) =>
       at == null || now.difference(at) > after;
@@ -401,6 +451,9 @@ class CupConnectionManager extends ChangeNotifier {
       case PosePacket():
         _latestPose = packet;
         _latestPoseAt = now;
+      case StatePacket():
+        _latestState = packet;
+        _latestStateAt = now;
       case DummyDataPacket() || RawPacket() || UnknownPacket():
         break;
     }
@@ -446,8 +499,9 @@ class CupConnectionManager extends ChangeNotifier {
     _deviceId = null;
     _deviceName = null;
     _deviceStatus = null;
-    // 即時姿態角只對目前連線有意義,斷線即清除。
+    // 即時姿態角與休眠狀態只對目前連線有意義,斷線即清除。
     _clearAttitude();
+    _clearState();
   }
 
   void _clearReadings() {
@@ -456,11 +510,17 @@ class CupConnectionManager extends ChangeNotifier {
     _latestPose = null;
     _latestPoseAt = null;
     _clearAttitude();
+    _clearState();
   }
 
   void _clearAttitude() {
     _latestAttitude = null;
     _latestAttitudeAt = null;
+  }
+
+  void _clearState() {
+    _latestState = null;
+    _latestStateAt = null;
   }
 
   Future<void> _safeDisconnect() async {

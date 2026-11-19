@@ -164,6 +164,51 @@ class AttitudePacket extends CupDataPacket {
   }
 }
 
+/// 水杯活動狀態(type 0x06 的 bits 7..0)。
+enum CupActivity {
+  /// 活動中:WATER / POSE / ATTITUDE 照常即時推送。
+  active,
+
+  /// 休眠中(淺眠):BLE 連線保持,但不送 POSE / ATTITUDE,
+  /// WATER 改為變化 ≥1% 時立即送、否則每 30 秒一次。
+  dozing,
+
+  /// 未定義的狀態代碼。
+  unknown;
+
+  static CupActivity fromCode(int code) => switch (code) {
+        0 => CupActivity.active,
+        1 => CupActivity.dozing,
+        _ => CupActivity.unknown,
+      };
+
+  String get label => switch (this) {
+        CupActivity.active => '活動中',
+        CupActivity.dozing => '休眠中',
+        CupActivity.unknown => '未知',
+      };
+}
+
+/// type 0x06:水杯活動狀態(活動中 / 休眠中)。
+///
+/// 韌體在狀態改變時、App 訂閱 Data Notify 後立即送一次,休眠中每 10 秒再送一次
+/// (keepalive)。App 回 ACK 並寫入接收紀錄。
+class StatePacket extends CupDataPacket {
+  const StatePacket({
+    required this.activity,
+    required this.secondsInState,
+    required super.timestamp,
+  });
+
+  /// [secondsInState] 的上限(uint24)。
+  static const int maxSecondsInState = 0xFFFFFF;
+
+  final CupActivity activity;
+
+  /// 進入目前狀態已經幾秒(韌體送出當下),0..[maxSecondsInState]。
+  final int secondsInState;
+}
+
 /// 未知 message type:保留原始 value,不中斷資料流。
 class UnknownPacket extends CupDataPacket {
   const UnknownPacket({
