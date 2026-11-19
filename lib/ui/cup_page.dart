@@ -49,7 +49,7 @@ class CupPage extends StatelessWidget {
               ? Padding(
                   key: const ValueKey('doze-banner'),
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: DozeBanner(dozingFor: manager.dozingFor(now)),
+                  child: const DozeBanner(),
                 )
               : const SizedBox(key: ValueKey('awake'), width: double.infinity),
         ),

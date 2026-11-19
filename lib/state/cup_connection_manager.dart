@@ -452,8 +452,18 @@ class CupConnectionManager extends ChangeNotifier {
         _latestPose = packet;
         _latestPoseAt = now;
       case StatePacket():
+        // 狀態沒變(休眠中每 10 秒的 keepalive、訂閱時的重送):只更新時間並回 ACK,
+        // 不寫進接收紀錄,避免紀錄被「休眠中」洗版。只有「進入休眠」「已喚醒」會記下來。
+        final repeat = _latestState?.activity == packet.activity;
         _latestState = packet;
         _latestStateAt = now;
+        if (repeat) {
+          notifyListeners();
+          unawaited(_ble.writeAck().catchError((Object e) {
+            debugPrint('[Cup] ACK 寫入失敗:$e');
+          }));
+          return;
+        }
       case DummyDataPacket() || RawPacket() || UnknownPacket():
         break;
     }

@@ -132,7 +132,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  /// 連線後推一組活動中的資料,再推 STATE=休眠(已休眠 75 秒)。
+  /// 連線後推一組活動中的資料,再推 STATE=休眠(韌體回報已休眠 75 秒,畫面不顯示)。
   Future<void> pushDozing(WidgetTester tester) async {
     ble.pushPacket(const WaterPacket(
         fill25: WaterPacket.fill25Max ~/ 2, level: 5, timestamp: 1));
@@ -155,7 +155,8 @@ void main() {
     // 休眠橫幅
     expect(find.text('水杯休眠中'), findsOneWidget);
     expect(find.text('藍牙保持連線 · 拿起杯子就會喚醒'), findsOneWidget);
-    expect(find.text('已休眠 1 分 15 秒'), findsOneWidget);
+    // 休眠不計時:畫面上不出現「已休眠 X 分」
+    expect(find.textContaining('已休眠'), findsNothing);
     expect(find.byIcon(Icons.bedtime), findsWidgets);
 
     // 連線面板:仍是已連線,只加註休眠中,不出現斷線/重新連線字樣
@@ -180,8 +181,15 @@ void main() {
     expect(find.textContaining('姿態資料過期'), findsNothing);
     expect(find.text('傾斜 1.8°'), findsOneWidget);
 
-    // 接收紀錄
-    expect(find.text('水杯休眠中 · 已休眠 1 分 15 秒'), findsOneWidget);
+    // 接收紀錄:只記「進入休眠」,不記時間
+    expect(find.text('水杯進入休眠'), findsOneWidget);
+    expect(find.textContaining('已接收 3 筆'), findsOneWidget);
+
+    // 休眠中的 keepalive(狀態沒變)不寫進接收紀錄
+    ble.pushPacket(const StatePacket(
+        activity: CupActivity.dozing, secondsInState: 85, timestamp: 2));
+    await tester.pumpAndSettle();
+    expect(find.text('水杯進入休眠'), findsOneWidget);
     expect(find.textContaining('已接收 3 筆'), findsOneWidget);
 
     // 喚醒 → 回到一般畫面
@@ -194,8 +202,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('水杯休眠中'), findsNothing);
-    expect(find.textContaining('已休眠 1 分'), findsOneWidget,
-        reason: '只剩接收紀錄那一行');
+    expect(find.textContaining('已休眠'), findsNothing);
     expect(find.text('目前連線:已連線'), findsOneWidget);
     expect(find.widgetWithText(Chip, '休眠中'), findsNothing);
     expect(find.widgetWithText(Chip, '直立'), findsOneWidget);

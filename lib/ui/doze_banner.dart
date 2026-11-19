@@ -6,14 +6,12 @@ import 'theme.dart';
 ///
 /// 用夜間色(靛藍)而非警示色,讓人一眼看出是正常的休眠,而不是斷線或故障。
 class DozeBanner extends StatelessWidget {
-  const DozeBanner({super.key, required this.dozingFor});
+  const DozeBanner({super.key});
 
-  /// 已休眠多久;null 時不顯示時間那一行。
-  final Duration? dozingFor;
+  // 不顯示「已休眠多久」:使用者只需要知道「現在在休眠、拿起來就醒」,不需要計時。
 
   @override
   Widget build(BuildContext context) {
-    final duration = dozingFor;
     return Semantics(
       container: true,
       child: Material(
@@ -58,18 +56,6 @@ class DozeBanner extends StatelessWidget {
                       '藍牙保持連線 · 拿起杯子就會喚醒',
                       style: TextStyle(fontSize: 13, color: AppColors.night),
                     ),
-                    if (duration != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        '已休眠 ${fmtDuration(duration)}',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.nightInk,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),

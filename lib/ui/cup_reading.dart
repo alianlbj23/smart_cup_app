@@ -158,17 +158,10 @@ String describePacket(CupDataPacket p) => switch (p) {
         '未知 type 0x${p.type.toRadixString(16)} · ${p.value}',
     };
 
-/// STATE 封包在接收紀錄的文字:剛切換時寫「進入休眠」/「已喚醒」,
-/// 之後的 keepalive(或訂閱時的狀態回報)附上已持續的時間。
-String describeState(StatePacket p) {
-  // 韌體在狀態改變時立即送,秒數可能已進位到 1。
-  final justChanged = p.secondsInState <= 1;
-  final since = fmtDuration(Duration(seconds: p.secondsInState));
-  return switch (p.activity) {
-    CupActivity.dozing =>
-      justChanged ? '水杯進入休眠' : '水杯休眠中 · 已休眠 $since',
-    CupActivity.active =>
-      justChanged ? '水杯已喚醒' : '水杯活動中 · 已持續 $since',
-    CupActivity.unknown => '水杯狀態未知 · 已持續 $since',
-  };
-}
+/// STATE 封包在接收紀錄的文字:只記狀態,不記時間長度
+/// (休眠中的 keepalive 不會寫進紀錄,見 CupConnectionManager)。
+String describeState(StatePacket p) => switch (p.activity) {
+      CupActivity.dozing => '水杯進入休眠',
+      CupActivity.active => '水杯已喚醒',
+      CupActivity.unknown => '水杯狀態未知',
+    };

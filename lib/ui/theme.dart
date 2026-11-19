@@ -85,13 +85,3 @@ const mutedSmall = TextStyle(fontSize: 12, color: AppColors.muted);
 
 String fmtTime(DateTime t) =>
     '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-
-/// 經過時間:「12 秒」、「3 分 05 秒」、「2 小時 07 分」。負值視為 0。
-String fmtDuration(Duration d) {
-  final total = d.isNegative ? 0 : d.inSeconds;
-  final h = total ~/ 3600, m = total % 3600 ~/ 60, s = total % 60;
-  String two(int v) => v.toString().padLeft(2, '0');
-  if (h > 0) return '$h 小時 ${two(m)} 分';
-  if (m > 0) return '$m 分 ${two(s)} 秒';
-  return '$s 秒';
-}
