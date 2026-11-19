@@ -49,7 +49,7 @@ flutter run                # 手機用 USB 接上電腦（Android 要開啟 USB 
 - 桌面版（Linux／Windows）關閉視窗前會先斷開藍牙。Linux 的 BlueZ 不會因為 App 結束就斷線，連線留著的話水杯不會廣播，下次開 App 會找不到。
 - 電量顯示在連線區塊右上角：40% 以上綠色、20～39% 橘色、低於 20% 紅色；沒接電池時顯示「--」。
 - 執行中在終端機按 `r` 熱重載、`R` 重新啟動、`q` 結束。
-- 看不到裝置的話，先執行 `flutter devices` 確認裝置有被偵測到。macOS 版目前還不能連水杯（見下方 [macOS](#macos只能在-macos-上編譯)）。
+- 看不到裝置的話，先執行 `flutter devices` 確認裝置有被偵測到。
 
 ## BLE 資料格式
 
@@ -160,16 +160,12 @@ flutter build ipa --release      # 產生 IPA
 flutter build macos --release
 ```
 
-- ⚠️ **目前還沒開藍牙權限**：App Sandbox 底下要加 Bluetooth entitlement，不然掃描不到水杯。
-  在 [DebugProfile.entitlements](macos/Runner/DebugProfile.entitlements) 和 [Release.entitlements](macos/Runner/Release.entitlements) 都加上：
-
-  ```xml
-  <key>com.apple.security.device.bluetooth</key>
-  <true/>
-  ```
-
-  也可以在 Xcode 的 Runner → Signing & Capabilities → App Sandbox → Hardware 勾選 Bluetooth。
-- 另外要在 `macos/Runner/Info.plist` 加上 `NSBluetoothAlwaysUsageDescription`，第一次啟動時系統才會詢問使用者。
+- 藍牙權限已設定好（2026-11-19）：
+  - [DebugProfile.entitlements](macos/Runner/DebugProfile.entitlements) 和 [Release.entitlements](macos/Runner/Release.entitlements) 有 `com.apple.security.device.bluetooth`（App Sandbox 底下沒有它就掃描不到水杯）。
+  - [Info.plist](macos/Runner/Info.plist) 有 `NSBluetoothAlwaysUsageDescription`，第一次啟動時系統會詢問是否允許使用藍牙，要按「允許」。不小心按了拒絕的話，到「系統設定 → 隱私權與安全性 → 藍牙」打開。
+- 最低支援 macOS 12.0。
+- 和 iOS 一樣，macOS 給每台裝置的 `remoteId` 是系統產生的 UUID，不是 MAC 位址，配對紀錄不能和其他平台共用。
+- 自己用的話 `flutter run -d macos` 或 `flutter build macos --release` 就好；要給別人用，需要在 Xcode 設定簽章（Signing & Capabilities 選 Team），沒簽章的 App 在別台 Mac 上會被 Gatekeeper 擋下。
 
 ### Windows
 
@@ -211,4 +207,5 @@ flutter build web --release
 | Linux | 已用 `flutter build linux --release` 編譯成功，並連實際水杯驗證水位、姿態、電量顯示、90 秒連續傳輸、休眠中連線不斷（休眠中連上 1.4 秒內顯示完整畫面、晃杯子恢復即時）、關閉視窗會斷開藍牙（2026-11-19） |
 | Windows | 已用 `flutter build windows --release` 編譯成功（2026-10-29） |
 | Web | 已用 `flutter build web --release` 編譯成功（2026-10-29） |
-| Android / iOS / macOS | 還沒在本機編譯驗證 |
+| macOS | 已加上藍牙權限設定（entitlement、Info.plist），還沒在 Mac 上編譯驗證 |
+| Android / iOS | 還沒在本機編譯驗證 |
