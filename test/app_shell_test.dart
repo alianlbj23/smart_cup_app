@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:stut_food_intake_project/main.dart';
 import 'package:stut_food_intake_project/services/ble_service.dart';
 import 'package:stut_food_intake_project/state/cup_connection_manager.dart';
+import 'package:stut_food_intake_project/ui/theme.dart';
 
 import 'fakes/fake_ble_service.dart';
 
@@ -65,7 +66,8 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
     expect(manager.state, CupConnectionState.ready);
     expect(find.text('目前連線:已連線'), findsOneWidget);
-    expect(find.textContaining('電量 80%'), findsOneWidget);
+    expect(find.text('80%'), findsOneWidget);
+    expect(find.byIcon(Icons.battery_5_bar), findsOneWidget);
     expect(find.text('配對其他水杯'), findsOneWidget);
 
     ble.pushPacket(const WaterPacket(
@@ -79,17 +81,25 @@ void main() {
     expect(find.textContaining('已接收 1 筆'), findsOneWidget);
   });
 
-  testWidgets('電量未知(0xFF)→ 顯示「電量 --」', (tester) async {
+  testWidgets('電量未知(0xFF)→ 顯示「--」與「電量未知」;低電量變紅色', (tester) async {
     await pumpApp(tester, const Size(1400, 1000));
     ble.deviceStatus = const DeviceStatus(batteryPercent: null);
     await pairCup(tester);
 
-    expect(find.textContaining('電量 --'), findsOneWidget);
+    expect(find.text('電量未知'), findsOneWidget);
+    expect(find.byIcon(Icons.battery_unknown), findsOneWidget);
     expect(find.textContaining('255%'), findsNothing);
 
     ble.pushStatus(const DeviceStatus(batteryPercent: 42));
     await tester.pumpAndSettle();
-    expect(find.textContaining('電量 42%'), findsOneWidget);
+    expect(find.text('42%'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('42%')).style?.color, AppColors.teal);
+
+    ble.pushStatus(const DeviceStatus(batteryPercent: 15));
+    await tester.pumpAndSettle();
+    expect(find.text('15%'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('15%')).style?.color, AppColors.red);
+    expect(find.byIcon(Icons.battery_alert), findsOneWidget);
   });
 
   testWidgets('水杯姿態面板:未連線顯示 --,收到資料後顯示傾斜角與姿態標籤',

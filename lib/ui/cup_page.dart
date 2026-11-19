@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../state/cup_connection_manager.dart';
+import 'battery_badge.dart';
 import 'cup_attitude.dart';
 import 'cup_link.dart';
 import 'cup_reading.dart';
@@ -64,14 +65,7 @@ class CupPage extends StatelessWidget {
                             fontSize: 15, fontWeight: FontWeight.w600)),
                     if (cupId != null)
                       Text(
-                        [
-                          cupDisplayName(cupName),
-                          cupId,
-                          if (ready && status != null)
-                            status.batteryPercent == null
-                                ? '電量 --'
-                                : '電量 ${status.batteryPercent}%',
-                        ].join(' · '),
+                        '${cupDisplayName(cupName)} · $cupId',
                         style: mutedSmall,
                       )
                     else
@@ -84,6 +78,11 @@ class CupPage extends StatelessWidget {
                   ],
                 ),
               ),
+              // 電量:連線且讀到 Device Status 後才顯示
+              if (ready && status != null) ...[
+                const SizedBox(width: 12),
+                BatteryBadge(percent: status.batteryPercent),
+              ],
             ],
           ),
           const SizedBox(height: 12),
