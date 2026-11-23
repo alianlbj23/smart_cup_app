@@ -1,6 +1,9 @@
+import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:stut_food_intake_project/data/intake_repository.dart';
 import 'package:stut_food_intake_project/main.dart';
 import 'package:stut_food_intake_project/services/ble_service.dart';
 import 'package:stut_food_intake_project/state/cup_connection_manager.dart';
@@ -13,6 +16,9 @@ const _cup = BleDeviceInfo(deviceId: 'AA:BB', deviceName: 'SmartCup', rssi: -50)
 void main() {
   late FakeBleService ble;
   late CupConnectionManager manager;
+  late IntakeRepository repo;
+
+  setUpAll(() => driftRuntimeOptions.dontWarnAboutMultipleDatabases = true);
 
   /// [remembered] 不為 null 時視為先前已配對,並如 main() 一樣呼叫 init()。
   Future<void> pumpApp(WidgetTester tester, Size size,
@@ -29,11 +35,15 @@ void main() {
     });
     ble = FakeBleService()..devicesInRange = inRange;
     manager = CupConnectionManager(ble: ble);
+    // 水杯頁不碰資料庫;統計/設定分頁要打開才會建立,這裡先不 init。
+    final db = AppDatabase(NativeDatabase.memory());
+    repo = IntakeRepository(db);
     addTearDown(() {
       manager.dispose();
       ble.dispose();
     });
-    await tester.pumpWidget(SmartCupApp(manager: manager));
+    addTearDown(db.close);
+    await tester.pumpWidget(SmartCupApp(manager: manager, repo: repo));
     if (remembered != null) {
       manager.init();
       await tester.pumpAndSettle();
@@ -49,13 +59,40 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('啟動未配對 → 只有水杯頁:未連線與配對入口', (tester) async {
+  testWidgets('啟動未配對 → 停在水杯頁:未連線與配對入口', (tester) async {
     await pumpApp(tester, const Size(1400, 1000));
 
     expect(find.text('目前連線:未連線'), findsOneWidget);
     expect(find.text('配對水杯'), findsOneWidget);
     expect(find.text('尚未收到資料'), findsOneWidget);
-    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('底部分頁:切到飲水統計、設定,再回水杯頁', (tester) async {
+    await pumpApp(tester, const Size(400, 800));
+    await tester.runAsync(repo.init);
+
+    Future<void> settle() async {
+      for (var i = 0; i < 3; i++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+    }
+
+    await tester.tap(find.text('飲水統計'));
+    await settle();
+    expect(find.text('週'), findsOneWidget);
+    expect(find.text('最長未喝水間隔'), findsOneWidget);
+
+    await tester.tap(find.text('設定'));
+    await settle();
+    expect(find.text('每日飲水目標'), findsWidgets);
+
+    await tester.tap(find.text('水杯'));
+    await tester.pump();
+    expect(find.text('配對水杯'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
