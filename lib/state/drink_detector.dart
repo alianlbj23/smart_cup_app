@@ -29,8 +29,10 @@ class DetectedIntake {
   final int beforeMl;
   final int afterMl;
 
-  /// 水量減少但沒看到「飲用中」姿態(可能是倒掉)、或過程太久時為
-  /// [IntakeStatus.uncertain],由使用者在 UI 確認。
+  /// 以下情況為 [IntakeStatus.uncertain],由使用者在 UI 確認:
+  /// - 水量減少但沒看到「飲用中」姿態(可能是倒掉);
+  /// - 水量增加但過程中看到「飲用中」姿態(可能喝了又裝水,喝的量被抵掉);
+  /// - 過程太久。
   final IntakeStatus status;
 
   @override
@@ -226,7 +228,9 @@ class DrinkDetector {
       status = sawDrinking && !tooLong ? IntakeStatus.ok : IntakeStatus.uncertain;
     } else if (deltaMl >= threshold) {
       kind = IntakeKind.refill;
-      status = tooLong ? IntakeStatus.uncertain : IntakeStatus.ok;
+      // 過程中出現過「飲用中」:可能先喝再裝水(或裝完先喝一口)才放回,
+      // 只看得到淨增加,喝的量算不出來 → 待確認,讓使用者補記喝了多少。
+      status = tooLong || sawDrinking ? IntakeStatus.uncertain : IntakeStatus.ok;
     } else {
       return null; // 雜訊
     }

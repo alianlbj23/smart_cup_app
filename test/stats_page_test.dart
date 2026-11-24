@@ -168,6 +168,53 @@ void main() {
     expect(dayTotal(tester), '今日 830 / 1,500 mL');
   });
 
+  Future<IntakeEvent> addUncertainRefill(WidgetTester tester) async =>
+      (await tester.runAsync(() => repo.addEvent(
+            kind: IntakeKind.refill,
+            ml: 230,
+            startedAt: DateTime(2026, 11, 23, 14, 10),
+            source: IntakeSource.appAuto,
+            status: IntakeStatus.uncertain,
+          )))!;
+
+  testWidgets('待確認的加水:有喝,補記 → 新增手動喝水,加水改為正常且不計入',
+      (tester) async {
+    final refill = await addUncertainRefill(tester);
+    await pumpPage(tester);
+    await reveal(tester, find.text('有喝,補記'));
+    expect(find.text('這次拿起時有喝的動作,可能也喝了水'), findsOneWidget);
+    await tester.tap(find.text('有喝,補記'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('event-ml')), '150');
+    await tester.tap(find.text('儲存'));
+    await settle(tester);
+
+    await toTop(tester);
+    expect(dayTotal(tester), '今日 900 / 1,500 mL');
+    final after = await tester.runAsync(() => repo.event(refill.id));
+    expect(after!.status, IntakeStatus.ok);
+    expect(after.kind, IntakeKind.refill);
+    final today = await tester.runAsync(() => repo.eventsOnDay(now));
+    final drink = today!.where((e) => e.ml == 150).single;
+    expect(drink.source, IntakeSource.manual);
+    expect(drink.startedAt, DateTime(2026, 11, 23, 14, 10));
+  });
+
+  testWidgets('待確認的加水:只是加水 → 改為正常,飲水量不變', (tester) async {
+    final refill = await addUncertainRefill(tester);
+    await pumpPage(tester);
+    await reveal(tester, find.text('只是加水'));
+    await tester.tap(find.text('只是加水'));
+    await settle(tester);
+
+    expect(find.text('只是加水'), findsNothing);
+    await toTop(tester);
+    expect(dayTotal(tester), '今日 750 / 1,500 mL');
+    final after = await tester.runAsync(() => repo.event(refill.id));
+    expect(after!.status, IntakeStatus.ok);
+    expect(after.kind, IntakeKind.refill);
+  });
+
   testWidgets('點紀錄可修改水量與刪除', (tester) async {
     await pumpPage(tester);
     await reveal(tester, find.text('07:30'));

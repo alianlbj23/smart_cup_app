@@ -211,6 +211,31 @@ class _StatsPageState extends State<StatsPage> {
   Future<void> _rejectDrink(IntakeEvent e) => _guard(() => widget.repo
       .updateEvent(e.id, kind: IntakeKind.discard, status: IntakeStatus.ok));
 
+  /// 待確認的加水:只是加水,沒有喝。
+  Future<void> _confirmRefill(IntakeEvent e) => _guard(
+      () => widget.repo.updateEvent(e.id, status: IntakeStatus.ok));
+
+  /// 待確認的加水:有喝,補記一筆手動喝水(時間預設為那次拿起的時間),
+  /// 加水本身確認為正常(仍不計入飲水量)。取消對話框則什麼都不改。
+  Future<void> _addDrinkForRefill(IntakeEvent e) async {
+    final r = await showIntakeEventDialog(
+      context,
+      day: startOfDay(e.startedAt),
+      initialTime: e.startedAt,
+      now: _now,
+    );
+    if (r is! IntakeEventSave) return;
+    await _guard(() async {
+      await widget.repo.addEvent(
+        kind: r.kind,
+        ml: r.ml,
+        startedAt: r.time,
+        source: IntakeSource.manual,
+      );
+      await widget.repo.updateEvent(e.id, status: IntakeStatus.ok);
+    });
+  }
+
   // ------------------------------------------------------------ 畫面
 
   @override
@@ -421,8 +446,12 @@ class _StatsPageState extends State<StatsPage> {
           _EventRow(
             event: e,
             onTap: () => _edit(e),
-            onConfirm: () => _confirmDrink(e),
-            onReject: () => _rejectDrink(e),
+            onConfirm: () => e.kind == IntakeKind.refill
+                ? _addDrinkForRefill(e)
+                : _confirmDrink(e),
+            onReject: () => e.kind == IntakeKind.refill
+                ? _confirmRefill(e)
+                : _rejectDrink(e),
           ),
         ],
       ],
@@ -598,7 +627,11 @@ class _EventRow extends StatelessWidget {
 
   final IntakeEvent event;
   final VoidCallback onTap;
+
+  /// 待確認時的主要按鈕:喝水 →「確認是喝水」;加水 →「有喝,補記」。
   final VoidCallback onConfirm;
+
+  /// 待確認時的次要按鈕:喝水 →「不是喝水」;加水 →「只是加水」。
   final VoidCallback onReject;
 
   @override
@@ -653,15 +686,30 @@ class _EventRow extends StatelessWidget {
               ],
             ),
             if (uncertain) ...[
+              if (e.kind == IntakeKind.refill)
+                const Padding(
+                  padding: EdgeInsets.only(top: 2),
+                  child: Text('這次拿起時有喝的動作,可能也喝了水',
+                      textAlign: TextAlign.end, style: mutedSmall),
+                ),
               const SizedBox(height: 4),
               Wrap(
                 alignment: WrapAlignment.end,
                 spacing: 8,
-                children: [
-                  TextButton(onPressed: onReject, child: const Text('不是喝水')),
-                  FilledButton.tonal(
-                      onPressed: onConfirm, child: const Text('確認是喝水')),
-                ],
+                children: e.kind == IntakeKind.refill
+                    ? [
+                        TextButton(
+                            onPressed: onReject, child: const Text('只是加水')),
+                        FilledButton.tonal(
+                            onPressed: onConfirm, child: const Text('有喝,補記')),
+                      ]
+                    : [
+                        TextButton(
+                            onPressed: onReject, child: const Text('不是喝水')),
+                        FilledButton.tonal(
+                            onPressed: onConfirm,
+                            child: const Text('確認是喝水')),
+                      ],
               ),
             ] else if (!counts)
               const Padding(
