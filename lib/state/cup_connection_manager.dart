@@ -112,6 +112,8 @@ class CupConnectionManager extends ChangeNotifier {
   int _session = 0;
   bool _disposed = false;
 
+  final _packets = StreamController<CupDataPacket>.broadcast();
+
   CupConnectionState get state => _state;
   CupFlow get flow => _flow;
   RememberedDevice? get rememberedDevice => _remembered;
@@ -129,6 +131,10 @@ class CupConnectionManager extends ChangeNotifier {
   DeviceStatus? get deviceStatus => _deviceStatus;
   List<ReceivedPacket> get log => List.unmodifiable(_log);
   int get receivedCount => _receivedCount;
+
+  /// 連線中收到的每一筆 Data Notify 封包(含 ATTITUDE / STATE / keepalive),
+  /// 供飲水偵測等功能訂閱;未連線時收到的封包不會送出。dispose 時關閉。
+  Stream<CupDataPacket> get packets => _packets.stream;
 
   /// 最近一筆水量;尚未收到或已換杯/斷線時為 null。
   WaterPacket? get latestWater => _latestWater;
@@ -438,6 +444,7 @@ class CupConnectionManager extends ChangeNotifier {
   void _onData(CupDataPacket packet) {
     if (!_linkUp) return;
     final now = DateTime.now();
+    _packets.add(packet);
     switch (packet) {
       case AttitudePacket():
         // 即時資料(約每秒 5 次):只保留最新值,不計數、不記錄、不回 ACK。
@@ -579,6 +586,7 @@ class CupConnectionManager extends ChangeNotifier {
     for (final s in _subs) {
       s.cancel();
     }
+    unawaited(_packets.close());
     unawaited(_safeDisconnect());
     super.dispose();
   }
