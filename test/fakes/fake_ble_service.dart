@@ -21,9 +21,18 @@ class FakeBleService implements BleService {
   final List<int> timeSyncs = [];
   int ackCount = 0;
 
+  /// 已回覆的 DRINK_EVENT ACK(3 bytes)的 seq,依序。
+  final List<int> drinkAcks = [];
+
+  /// 設定後 writeDrinkEventAck() 一律以此例外失敗。
+  BleException? drinkAckError;
+
   /// readDeviceStatus() 回傳的狀態。
   DeviceStatus deviceStatus = const DeviceStatus(batteryPercent: 80);
   int disconnectCount = 0;
+
+  /// 設定後 readDeviceStatus() 會等到它完成才回傳(模擬連線初始化還沒結束)。
+  Completer<void>? statusGate;
 
   bool _scanning = false;
 
@@ -99,8 +108,17 @@ class FakeBleService implements BleService {
   }
 
   @override
+  Future<void> writeDrinkEventAck(int seq) async {
+    _requireConnected();
+    final error = drinkAckError;
+    if (error != null) throw error;
+    drinkAcks.add(seq);
+  }
+
+  @override
   Future<DeviceStatus> readDeviceStatus() async {
     _requireConnected();
+    await statusGate?.future;
     return deviceStatus;
   }
 

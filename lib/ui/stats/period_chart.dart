@@ -20,7 +20,7 @@ class PeriodBarChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = stats;
-    final maxY = niceMax(math.max(s.goalMl, s.maxMl).toDouble() * 1.05);
+    final maxY = niceMax(math.max(s.goalMl ?? 0, s.maxMl).toDouble() * 1.05);
     final interval = niceInterval(maxY);
     return LayoutBuilder(builder: (context, c) {
       final plotWidth = math.max(0.0, c.maxWidth - ChartStyle.leftReserved);
@@ -47,9 +47,10 @@ class PeriodBarChart extends StatelessWidget {
                   const FlLine(color: ChartStyle.grid, strokeWidth: 1),
             ),
             extraLinesData: ExtraLinesData(horizontalLines: [
-              if (s.goalMl > 0)
+              // 沒有目標(照護系統尚未設定)就不畫目標線。
+              if (s.hasGoal)
                 HorizontalLine(
-                  y: s.goalMl.toDouble(),
+                  y: s.goalMl!.toDouble(),
                   color: ChartStyle.reference,
                   strokeWidth: 1.5,
                   dashArray: const [6, 4],
@@ -58,7 +59,7 @@ class PeriodBarChart extends StatelessWidget {
                     alignment: Alignment.topRight,
                     padding: const EdgeInsets.only(right: 2, bottom: 2),
                     style: ChartStyle.axisText,
-                    labelResolver: (_) => '目標 ${fmtMl(s.goalMl)}',
+                    labelResolver: (_) => '目標 ${fmtMl(s.goalMl!)}',
                   ),
                 ),
             ]),

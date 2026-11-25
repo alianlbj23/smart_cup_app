@@ -92,7 +92,7 @@ class DayStats {
   factory DayStats.fromEvents(
     List<IntakeEvent> events, {
     required DateTime day,
-    required int goalMl,
+    required int? goalMl,
     required DateTime now,
   }) {
     final start = startOfDay(day);
@@ -107,8 +107,14 @@ class DayStats {
 
   /// 當天 00:00。
   final DateTime day;
-  final int goalMl;
+
+  /// 每日目標(mL)。null = 沒有目標(已連結照護系統但照護系統尚未設定):
+  /// 不算達成率、不畫理想進度,不可以拿預設值來代替。
+  final int? goalMl;
   final DateTime now;
+
+  /// 有沒有可以拿來比較的目標。
+  bool get hasGoal => (goalMl ?? 0) > 0;
 
   /// 當天每一次喝水,依時間排序。
   final List<DrinkPoint> drinks;
@@ -126,10 +132,10 @@ class DayStats {
   /// 當日總飲水量。
   late final int totalMl = drinks.fold(0, (s, d) => s + d.ml);
 
-  /// 達成率(可超過 1)。目標為 0 時視為 0。
-  double get progress => goalMl <= 0 ? 0 : totalMl / goalMl;
+  /// 達成率(可超過 1)。沒有目標時為 0。
+  double get progress => hasGoal ? totalMl / goalMl! : 0;
 
-  bool get metGoal => goalMl > 0 && totalMl >= goalMl;
+  bool get metGoal => hasGoal && totalMl >= goalMl!;
 
   /// 每小時飲水量,索引 0–23。
   late final List<int> hourly = () {
@@ -155,11 +161,13 @@ class DayStats {
   }();
 
   /// [t] 時的理想累積量:06:00 為 0,直線上升到 20:00 達到目標,之後持平。
+  /// 沒有目標時為 0。
   double idealAt(DateTime t) {
-    if (!t.isAfter(wakingStart)) return 0;
-    if (!t.isBefore(wakingEnd)) return goalMl.toDouble();
+    final goal = goalMl;
+    if (goal == null || goal <= 0 || !t.isAfter(wakingStart)) return 0;
+    if (!t.isBefore(wakingEnd)) return goal.toDouble();
     final span = wakingEnd.difference(wakingStart).inSeconds;
-    return goalMl * t.difference(wakingStart).inSeconds / span;
+    return goal * t.difference(wakingStart).inSeconds / span;
   }
 
   /// [t] 時(含)實際的累積量。
@@ -283,7 +291,7 @@ class PeriodStats {
     Map<DateTime, int> totals, {
     required DateTime from,
     required DateTime to,
-    required int goalMl,
+    required int? goalMl,
     required DateTime now,
   }) {
     final byKey = {for (final e in totals.entries) dayKey(e.key): e.value};
@@ -314,8 +322,13 @@ class PeriodStats {
 
   final DateTime from;
   final DateTime to;
-  final int goalMl;
+
+  /// 每日目標(mL);null = 沒有目標(照護系統尚未設定),不算達標天數、不畫目標線。
+  final int? goalMl;
   final List<DayTotal> days;
+
+  /// 有沒有可以拿來比較的目標。
+  bool get hasGoal => (goalMl ?? 0) > 0;
 
   /// 期間的天數(週 7、月 28–31)。
   int get dayCount => days.length;
@@ -329,9 +342,9 @@ class PeriodStats {
   /// 整段都在未來時為 0。今天還沒結束,所以當天早上的平均會偏低。
   double get averageMl => elapsedDays == 0 ? 0 : totalMl / elapsedDays;
 
-  /// 達標天數:總量 ≥ 目標的日子。
+  /// 達標天數:總量 ≥ 目標的日子。沒有目標時為 0。
   int get daysMetGoal =>
-      goalMl <= 0 ? 0 : days.where((d) => d.ml >= goalMl).length;
+      hasGoal ? days.where((d) => d.ml >= goalMl!).length : 0;
 
   int get maxMl => days.fold(0, (m, d) => d.ml > m ? d.ml : m);
 }

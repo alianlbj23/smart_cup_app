@@ -158,6 +158,20 @@ void main() {
     expect(added.kind, IntakeKind.drink);
   });
 
+  testWidgets('手動新增:單筆上限和照護系統一致(2000 mL),超過不存', (tester) async {
+    await pumpPage(tester);
+    await reveal(tester, find.text('手動新增'));
+    await tester.tap(find.text('手動新增'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('event-ml')), '2001');
+    await tester.tap(find.text('儲存'));
+    await tester.pumpAndSettle();
+    expect(find.text('請輸入 1–2000 之間的毫升數'), findsOneWidget);
+    final today = await tester.runAsync(() => repo.eventsOnDay(now));
+    expect(today!.where((e) => e.ml == 2001), isEmpty);
+  });
+
   testWidgets('待確認事件:確認是喝水後計入', (tester) async {
     await pumpPage(tester);
     await reveal(tester, find.text('確認是喝水'));
@@ -260,5 +274,83 @@ void main() {
       await tester.pumpAndSettle();
     }
     expect(tester.takeException(), isNull);
+  });
+
+  group('每日目標以照護系統為準', () {
+    testWidgets('照護系統有設定目標:顯示 Server 的值', (tester) async {
+      await repo.applyServerGoal(1800);
+      await pumpPage(tester);
+      expect(dayTotal(tester), '今日 750 / 1,800 mL');
+      expect(find.textContaining('達成 42%'), findsOneWidget);
+      expect(find.text('照護系統尚未設定目標'), findsNothing);
+    });
+
+    testWidgets('照護系統尚未設定目標(null):日檢視不顯示目標、達成率與理想進度,不套用預設值',
+        (tester) async {
+      await repo.applyServerGoal(null);
+      await pumpPage(tester);
+
+      expect(dayTotal(tester), '今日 750 mL');
+      expect(find.text('照護系統尚未設定目標'), findsOneWidget);
+      expect(find.textContaining('1,500'), findsNothing);
+      expect(find.textContaining('達成'), findsNothing);
+      expect(find.textContaining('理想進度'), findsNothing);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('照護系統尚未設定目標(null):週、月檢視不畫目標線,達標天數顯示「—」',
+        (tester) async {
+      await repo.applyServerGoal(null);
+      await pumpPage(tester);
+      for (final range in ['週', '月']) {
+        await tester.tap(find.text(range));
+        await settle(tester);
+
+        final met = find.byKey(const ValueKey('period-met'));
+        expect(find.descendant(of: met, matching: find.text('—')), findsOneWidget);
+        expect(
+            find.descendant(of: met, matching: find.text('照護系統尚未設定目標')),
+            findsOneWidget);
+        expect(find.text('虛線為每日目標'), findsNothing);
+        expect(find.textContaining('目標 1,500'), findsNothing);
+        expect(find.bySemanticsLabel('達標'), findsNothing);
+        expect(tester.takeException(), isNull);
+      }
+    });
+
+    testWidgets('目標從有變成 null:畫面跟著更新', (tester) async {
+      await repo.applyServerGoal(1800);
+      await pumpPage(tester);
+      expect(dayTotal(tester), '今日 750 / 1,800 mL');
+
+      await tester.runAsync(() => repo.applyServerGoal(null));
+      await settle(tester);
+      expect(dayTotal(tester), '今日 750 mL');
+      expect(find.text('照護系統尚未設定目標'), findsOneWidget);
+    });
+  });
+
+  testWidgets('韌體事件:時間為估計(time_unknown)的紀錄有標示,一樣計入', (tester) async {
+    await repo.ensureCup('AA:BB', 'SmartCup');
+    await repo.addFirmwareEvent(
+      cupId: 'AA:BB',
+      dedupKey: '7:0:124:111',
+      kind: IntakeKind.drink,
+      ml: 23,
+      startedAt: DateTime(2026, 11, 23, 14, 5),
+      timeEstimated: true,
+      capacityMl: 350,
+      levelBeforePct: 62,
+      levelAfterPct: 55.5,
+      sawDrinking: false,
+      tooLong: false,
+      seq: 7,
+    );
+    await pumpPage(tester);
+
+    expect(dayTotal(tester), '今日 773 / 1,500 mL');
+    await reveal(tester, find.text('14:05'));
+    expect(find.text('時間為估計'), findsOneWidget);
   });
 }

@@ -272,4 +272,50 @@ void main() {
       expect(s.totalMl, 0);
     });
   });
+
+  group('沒有每日目標(已連結照護系統但尚未設定)', () {
+    final day = DateTime(2026, 11, 23);
+    IntakeEvent drink(int hour, int ml) => IntakeEvent(
+          id: 'g$hour',
+          drinkerId: 'me',
+          kind: IntakeKind.drink,
+          ml: ml,
+          startedAtMs: DateTime(2026, 11, 23, hour).millisecondsSinceEpoch,
+          tzOffsetMin: 480,
+          localDay: '2026-11-23',
+          source: IntakeSource.manual,
+          status: IntakeStatus.ok,
+          updatedAtMs: 0,
+        );
+
+    test('DayStats:goalMl 為 null → 沒有達成率、不算達標、沒有理想進度', () {
+      final s = DayStats.fromEvents([drink(9, 900), drink(13, 900)],
+          day: day, goalMl: null, now: DateTime(2026, 11, 23, 15));
+      expect(s.goalMl, isNull);
+      expect(s.hasGoal, isFalse);
+      expect(s.totalMl, 1800);
+      expect(s.progress, 0);
+      expect(s.metGoal, isFalse);
+      expect(s.idealAt(DateTime(2026, 11, 23, 13)), 0);
+      expect(s.idealAt(DateTime(2026, 11, 23, 22)), 0);
+    });
+
+    test('DayStats:有目標時 hasGoal 為 true', () {
+      final s = DayStats.fromEvents([drink(9, 900)],
+          day: day, goalMl: 1800, now: DateTime(2026, 11, 23, 15));
+      expect(s.hasGoal, isTrue);
+      expect(s.progress, 0.5);
+    });
+
+    test('PeriodStats:goalMl 為 null → 達標天數 0,累積與平均照算', () {
+      final w = PeriodStats.weekRange(day);
+      final s = PeriodStats.fromTotals({day: 2000},
+          from: w.from, to: w.to, goalMl: null, now: DateTime(2026, 11, 23, 15));
+      expect(s.goalMl, isNull);
+      expect(s.hasGoal, isFalse);
+      expect(s.daysMetGoal, 0);
+      expect(s.totalMl, 2000);
+      expect(s.averageMl, 2000);
+    });
+  });
 }

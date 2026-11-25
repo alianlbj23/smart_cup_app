@@ -152,7 +152,8 @@ Future<String> exportBackupJson(IntakeRepository repo, {DateTime? now}) async {
 /// 不會刪除本機有、備份檔沒有的資料(備份檔裡標記為已刪除的事件則會同步為已刪除)。
 ///
 /// 每日目標一律套用備份檔的設定:匯入是使用者明確的還原動作,而且新裝置的預設目標
-/// 是安裝當下建立的,無法和備份檔比較新舊。
+/// 是安裝當下建立的,無法和備份檔比較新舊。例外:已連結照護系統時目標以 Server 為準,
+/// 不會被備份檔改掉。
 ///
 /// 先完整解析再寫入,格式有誤時丟出 [FormatException] 且不會改動任何資料。
 Future<ImportResult> importBackup(IntakeRepository repo, String json) async {
@@ -167,7 +168,9 @@ Future<ImportResult> importBackup(IntakeRepository repo, String json) async {
 
   final eventsChanged = await repo.importEvents(data.events);
 
-  final goalChanged = repo.dailyGoalMl != data.dailyGoalMl;
+  // 已連結照護系統時每日目標以 Server 為準,不套用備份檔的設定。
+  final goalChanged =
+      !repo.goalFromServer && repo.dailyGoalMl != data.dailyGoalMl;
   if (goalChanged) await repo.setDailyGoal(data.dailyGoalMl);
 
   return ImportResult(

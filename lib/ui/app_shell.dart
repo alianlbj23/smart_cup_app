@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/intake_repository.dart';
+import '../state/care_link_manager.dart';
+import '../state/care_sync.dart';
 import '../state/cup_connection_manager.dart';
 import 'cup_page.dart';
 import 'settings_page.dart';
@@ -10,10 +12,20 @@ import 'stats_page.dart';
 import 'theme.dart';
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, required this.manager, required this.repo});
+  const AppShell({
+    super.key,
+    required this.manager,
+    required this.repo,
+    this.care,
+    this.careSync,
+  });
 
   final CupConnectionManager manager;
   final IntakeRepository repo;
+
+  /// 照護系統的連結與背景同步;有傳入時「設定」頁才有「照護系統」區塊。
+  final CareLinkManager? care;
+  final CareSync? careSync;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -49,7 +61,11 @@ class _AppShellState extends State<AppShell> {
                 CupPage(manager: widget.manager, now: DateTime.now()),
           ),
       () => StatsPage(repo: widget.repo),
-      () => SettingsPage(repo: widget.repo),
+      () => SettingsPage(
+            repo: widget.repo,
+            care: widget.care,
+            careSync: widget.careSync,
+          ),
     ];
     return Scaffold(
       body: SafeArea(

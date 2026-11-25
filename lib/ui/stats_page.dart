@@ -331,7 +331,7 @@ class _StatsPageState extends State<StatsPage> {
     final events = _events!;
     final day = _loadedFor!.$2;
     final s = DayStats.fromEvents(events,
-        day: day, goalMl: widget.repo.dailyGoalMl, now: _now);
+        day: day, goalMl: widget.repo.goalMl, now: _now);
     return [
       Panel(child: _dayTotal(s)),
       const SizedBox(height: 12),
@@ -354,10 +354,16 @@ class _StatsPageState extends State<StatsPage> {
     ];
   }
 
+  /// 已連結照護系統而照護系統還沒設定目標時顯示的文字(不套用任何預設值)。
+  static const noGoalText = '照護系統尚未設定目標';
+
   Widget _dayTotal(DayStats s) {
     final goal = s.goalMl;
+    final hasGoal = s.hasGoal && goal != null;
     final String detail;
-    if (s.isToday) {
+    if (!hasGoal) {
+      detail = '';
+    } else if (s.isToday) {
       final ideal = s.idealAt(s.now).round();
       final diff = s.totalMl - ideal;
       detail = s.metGoal
@@ -391,24 +397,29 @@ class _StatsPageState extends State<StatsPage> {
                     color: AppColors.ink),
               ),
               TextSpan(
-                text: ' / ${fmtMl(goal)} mL',
+                text: hasGoal ? ' / ${fmtMl(goal)} mL' : ' mL',
                 style: const TextStyle(fontSize: 16, color: AppColors.muted),
               ),
             ],
           ),
         ),
         const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: s.progress.clamp(0.0, 1.0),
-            minHeight: 8,
-            color: AppColors.teal,
-            backgroundColor: AppColors.teal.withValues(alpha: 0.15),
+        if (hasGoal) ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: s.progress.clamp(0.0, 1.0),
+              minHeight: 8,
+              color: AppColors.teal,
+              backgroundColor: AppColors.teal.withValues(alpha: 0.15),
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
-        Text('達成 ${(s.progress * 100).round()}% · $detail', style: mutedSmall),
+          const SizedBox(height: 6),
+          Text('達成 ${(s.progress * 100).round()}% · $detail',
+              style: mutedSmall),
+        ] else
+          // 沒有目標:只顯示喝了多少,不算達成率、不畫進度條。
+          const Text(noGoalText, style: mutedSmall),
       ],
     );
   }
@@ -465,7 +476,7 @@ class _StatsPageState extends State<StatsPage> {
     final from = _loadedFor!.$2;
     final p = _periodOf(_range, from);
     final s = PeriodStats.fromTotals(_totals!,
-        from: p.from, to: p.to, goalMl: widget.repo.dailyGoalMl, now: _now);
+        from: p.from, to: p.to, goalMl: widget.repo.goalMl, now: _now);
     final unit = isMonth ? '月' : '週';
     final partial = s.elapsedDays < s.dayCount;
     return [
@@ -496,8 +507,8 @@ class _StatsPageState extends State<StatsPage> {
                 child: _SummaryTile(
                   key: const ValueKey('period-met'),
                   label: '達標天數',
-                  value: '${s.daysMetGoal}/${s.dayCount}',
-                  detail: '目標 ${fmtMl(s.goalMl)} mL',
+                  value: s.hasGoal ? '${s.daysMetGoal}/${s.dayCount}' : '—',
+                  detail: s.hasGoal ? '目標 ${fmtMl(s.goalMl!)} mL' : noGoalText,
                 ),
               ),
             ],
@@ -511,7 +522,7 @@ class _StatsPageState extends State<StatsPage> {
           children: [
             const Text('每日飲水量',
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const Text('虛線為每日目標', style: mutedSmall),
+            if (s.hasGoal) const Text('虛線為每日目標', style: mutedSmall),
             const SizedBox(height: 12),
             if (s.totalMl == 0)
               SizedBox(
@@ -551,7 +562,7 @@ class _StatsPageState extends State<StatsPage> {
                           const SizedBox(width: 8),
                           SizedBox(
                             width: 18,
-                            child: d.ml >= s.goalMl && s.goalMl > 0
+                            child: s.hasGoal && d.ml >= s.goalMl!
                                 ? const Icon(Icons.check_circle,
                                     size: 16, color: AppColors.teal,
                                     semanticLabel: '達標')
@@ -671,6 +682,8 @@ class _EventRow extends StatelessWidget {
                       Text(intakeKindLabel(e.kind)),
                       _Badge(auto ? '自動' : '手動'),
                       if (uncertain) const _Badge('待確認', color: AppColors.orange),
+                      // 韌體送來時沒有可信的時間(time_unknown):顯示的是 App 收到的時間。
+                      if (e.timeEstimated ?? false) const _Badge('時間為估計'),
                     ],
                   ),
                 ),

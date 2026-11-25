@@ -471,6 +471,15 @@ class CupConnectionManager extends ChangeNotifier {
           }));
           return;
         }
+      case DrinkEventPacket():
+        // 韌體事件:不回 1-byte ACK。IntakeRecorder 把事件存進資料庫(或確認是重複)
+        // 之後才呼叫 [ackDrinkEvent] 回 3-byte ACK;先 ACK 的話韌體會把事件從 flash
+        // 刪掉,萬一還沒存好(寫入失敗、連線還在初始化)這筆就永遠不見了。
+        _receivedCount++;
+        _log.add(ReceivedPacket(packet, now, acked: false));
+        if (_log.length > maxLogEntries) _log.removeAt(0);
+        notifyListeners();
+        return;
       case DummyDataPacket() || RawPacket() || UnknownPacket():
         break;
     }
@@ -491,6 +500,28 @@ class CupConnectionManager extends ChangeNotifier {
     }).catchError((Object e) {
       debugPrint('[Cup] ACK 寫入失敗:$e');
     });
+  }
+
+  /// 確認一筆 DRINK_EVENT:寫入 3-byte ACK `[0x07, seq 低 8 bits, seq 高 3 bits]`,
+  /// 韌體收到才從 flash 刪除。重複收到的事件也要呼叫(韌體沒收到上一次的 ACK)。
+  ///
+  /// 回傳是否寫入成功;已斷線或寫入失敗回傳 false(不丟例外),韌體會重送。
+  Future<bool> ackDrinkEvent(DrinkEventPacket packet) async {
+    if (!_linkUp) return false;
+    final session = _session;
+    try {
+      await _ble.writeDrinkEventAck(packet.seq);
+    } on BleException catch (e) {
+      debugPrint('[Cup] DRINK_EVENT seq ${packet.seq} 的 ACK 寫入失敗:$e');
+      return false;
+    }
+    if (session != _session) return true;
+    final idx = _log.indexWhere((e) => identical(e.packet, packet) && !e.acked);
+    if (idx >= 0) {
+      _log[idx] = ReceivedPacket(packet, _log[idx].receivedAt, acked: true);
+      notifyListeners();
+    }
+    return true;
   }
 
   void _onStatus(DeviceStatus status) {

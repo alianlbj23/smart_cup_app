@@ -23,12 +23,15 @@ class DayDistributionChart extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Wrap(
+        Wrap(
           spacing: 16,
           runSpacing: 4,
           children: [
-            LegendKey(label: '累積飲水', color: ChartStyle.data),
-            LegendKey(label: '理想進度', color: ChartStyle.reference, dashed: true),
+            const LegendKey(label: '累積飲水', color: ChartStyle.data),
+            // 沒有目標(照護系統尚未設定)就沒有理想進度可畫。
+            if (stats.hasGoal)
+              const LegendKey(
+                  label: '理想進度', color: ChartStyle.reference, dashed: true),
           ],
         ),
         const SizedBox(height: 8),
@@ -136,7 +139,7 @@ class _CumulativeChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = stats;
     final maxY = niceMax(
-        [s.goalMl, s.totalMl].reduce((a, b) => a > b ? a : b).toDouble() * 1.05);
+        [s.goalMl ?? 0, s.totalMl].reduce((a, b) => a > b ? a : b).toDouble() * 1.05);
     final interval = niceInterval(maxY);
     final drinkXs = {for (final d in s.drinks) _hourX(s.day, d.time)};
 
@@ -165,7 +168,7 @@ class _CumulativeChart extends StatelessWidget {
       ),
     );
 
-    final g = s.goalMl.toDouble();
+    final g = (s.goalMl ?? 0).toDouble();
     final ideal = LineChartBarData(
       spots: [
         const FlSpot(0, 0),
@@ -196,7 +199,8 @@ class _CumulativeChart extends StatelessWidget {
           topTitles: _noTitles,
           rightTitles: _noTitles,
         ),
-        lineBarsData: [ideal, cumulative],
+        // 沒有目標時只畫累積線。
+        lineBarsData: [if (s.hasGoal) ideal, cumulative],
         lineTouchData: LineTouchData(
           getTouchedSpotIndicator: (bar, idx) => [
             for (final _ in idx)
@@ -209,7 +213,7 @@ class _CumulativeChart extends StatelessWidget {
           ],
           touchTooltipData: _tooltip((spots) => [
                 for (final sp in spots)
-                  sp.barIndex == 0
+                  sp.bar == ideal
                       ? null
                       : LineTooltipItem(
                           '${_fmtHour(sp.x)} 累積 ${fmtMl(sp.y)} mL',

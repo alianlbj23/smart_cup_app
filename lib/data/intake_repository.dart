@@ -41,6 +41,13 @@ extension IntakeEventX on IntakeEvent {
       kind == IntakeKind.drink && status == IntakeStatus.ok;
 }
 
+/// [IntakeRepository.addFirmwareEvent] 的結果:[created] 為 false 代表這筆事件
+/// 之前就收過(韌體重送),[event] 是已經存在的那一筆。
+typedef FirmwareEventResult = ({IntakeEvent event, bool created});
+
+/// 一筆紀錄的版本:id + 上傳當下的 updatedAtMs。
+typedef SyncedVersion = ({String id, int updatedAtMs});
+
 /// 飲水紀錄、水杯與飲用者設定的存取層(SQLite / drift)。
 ///
 /// 寫入後會 [notifyListeners],UI 收到通知再重新查詢即可。
@@ -64,7 +71,16 @@ class IntakeRepository extends ChangeNotifier {
 
   /// 目前的飲用者;[init] 之前為 null。
   DrinkerRow? get drinker => _drinker;
+
+  /// 存在本機的每日目標(`drinkers.daily_goal_ml`)。畫面要顯示的目標請用 [goalMl]。
   int get dailyGoalMl => _drinker?.dailyGoalMl ?? defaultDailyGoalMl;
+
+  /// 已連結照護系統:每日目標以 Server 為準,不能在 App 修改。
+  bool get goalFromServer => _drinker?.goalFromServer ?? false;
+
+  /// 目前有效的每日目標(mL)。已連結照護系統而照護系統還沒設定目標時為 null:
+  /// 畫面要顯示「照護系統尚未設定目標」,不可以套用任何預設值。
+  int? get goalMl => goalFromServer ? _drinker?.serverGoalMl : dailyGoalMl;
 
   int get _nowMs => _clock().millisecondsSinceEpoch;
 
@@ -84,7 +100,11 @@ class IntakeRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 修改本機的每日目標。已連結照護系統時目標以 Server 為準,會丟出 [StateError]。
   Future<void> setDailyGoal(int ml) async {
+    if (goalFromServer) {
+      throw StateError('已連結照護系統,每日目標由照護系統設定');
+    }
     await (_db.update(_db.drinkers)
           ..where((d) => d.id.equals(defaultDrinkerId)))
         .write(DrinkersCompanion(
@@ -93,6 +113,47 @@ class IntakeRepository extends ChangeNotifier {
     ));
     _drinker = _drinker?.copyWith(dailyGoalMl: ml, updatedAtMs: _nowMs);
     notifyListeners();
+  }
+
+  /// 已連結照護系統:套用 Server 回傳的每日目標。[ml] 為 null 代表照護系統還沒設定,
+  /// 之後 [goalMl] 為 null;有值時一併更新 `drinkers.daily_goal_ml`。
+  Future<void> applyServerGoal(int? ml) async {
+    if (ml != null && ml <= 0) {
+      throw ArgumentError.value(ml, 'ml', '每日目標必須是正整數');
+    }
+    final d = _drinker;
+    if (d != null && d.goalFromServer && d.serverGoalMl == ml) return;
+    await (_db.update(_db.drinkers)
+          ..where((d) => d.id.equals(defaultDrinkerId)))
+        .write(DrinkersCompanion(
+      goalFromServer: const Value(true),
+      serverGoalMl: Value(ml),
+      dailyGoalMl: ml == null ? const Value.absent() : Value(ml),
+      updatedAtMs: Value(_nowMs),
+    ));
+    await _reloadDrinker();
+    notifyListeners();
+  }
+
+  /// 解除連結(或連結失效):回到單機行為,目標是 `drinkers.daily_goal_ml`
+  /// (照護系統設定過就是最後那個值),可以再由使用者修改。
+  Future<void> clearServerGoal() async {
+    if (!goalFromServer) return;
+    await (_db.update(_db.drinkers)
+          ..where((d) => d.id.equals(defaultDrinkerId)))
+        .write(DrinkersCompanion(
+      goalFromServer: const Value(false),
+      serverGoalMl: const Value(null),
+      updatedAtMs: Value(_nowMs),
+    ));
+    await _reloadDrinker();
+    notifyListeners();
+  }
+
+  Future<void> _reloadDrinker() async {
+    _drinker = await (_db.select(_db.drinkers)
+          ..where((d) => d.id.equals(defaultDrinkerId)))
+        .getSingle();
   }
 
   // ---------------------------------------------------------------- 水杯
@@ -132,6 +193,13 @@ class IntakeRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 記下水杯自己回報的 BLE 位址(Device Status,韌體 0.4.0 起)。
+  Future<void> setCupBleAddress(String id, String address) async {
+    await (_db.update(_db.cups)..where((c) => c.id.equals(id))).write(
+        CupsCompanion(bleAddress: Value(address), updatedAtMs: Value(_nowMs)));
+    notifyListeners();
+  }
+
   // ---------------------------------------------------------------- 事件
 
   Future<IntakeEvent> addEvent({
@@ -142,6 +210,7 @@ class IntakeRepository extends ChangeNotifier {
     String? cupId,
     int? beforeMl,
     int? afterMl,
+    int? capacityMl,
     IntakeSource source = IntakeSource.manual,
     IntakeStatus status = IntakeStatus.ok,
   }) async {
@@ -159,6 +228,7 @@ class IntakeRepository extends ChangeNotifier {
           localDay: dayKey(local),
           beforeMl: Value(beforeMl),
           afterMl: Value(afterMl),
+          capacityMl: Value(capacityMl),
           source: source,
           status: Value(status),
           updatedAtMs: _nowMs,
@@ -167,11 +237,82 @@ class IntakeRepository extends ChangeNotifier {
     return (await event(id))!;
   }
 
+  /// 寫入一筆韌體送來的事件(DRINK_EVENT 0x07),來源為 [IntakeSource.firmware]、
+  /// 狀態一律 ok。
+  ///
+  /// 以 `(cupId, dedupKey)` 去重:韌體沒收到 ACK 會重送同一筆,已經存在(包含
+  /// 使用者之後刪除的)就不再新增,回傳 `created: false`。
+  ///
+  /// [startedAt]:韌體的時間戳;[timeEstimated] 為 true 時是 App 收到的時間。
+  /// 同一個水杯剛好有另一筆事件在同一毫秒時往後挪 1 ms(既有的
+  /// `(cupId, startedAtMs)` 唯一鍵),不同的事件不會因此被丟掉。
+  Future<FirmwareEventResult> addFirmwareEvent({
+    required String cupId,
+    required String dedupKey,
+    required IntakeKind kind,
+    required int ml,
+    required DateTime startedAt,
+    required bool timeEstimated,
+    required int capacityMl,
+    required double levelBeforePct,
+    required double levelAfterPct,
+    required bool sawDrinking,
+    required bool tooLong,
+    required int seq,
+  }) async {
+    final local = startedAt.toLocal();
+    final result = await _db.transaction<FirmwareEventResult>(() async {
+      final existing = await (_db.select(_db.intakeEvents)
+            ..where((e) => e.cupId.equals(cupId) & e.fwKey.equals(dedupKey)))
+          .getSingleOrNull();
+      if (existing != null) return (event: existing, created: false);
+
+      var startedAtMs = local.millisecondsSinceEpoch;
+      while (await (_db.select(_db.intakeEvents)
+                ..where((e) =>
+                    e.cupId.equals(cupId) & e.startedAtMs.equals(startedAtMs)))
+              .getSingleOrNull() !=
+          null) {
+        startedAtMs++;
+      }
+      final id = _uuid.v4();
+      await _db.into(_db.intakeEvents).insert(IntakeEventsCompanion.insert(
+            id: id,
+            drinkerId: defaultDrinkerId,
+            cupId: Value(cupId),
+            kind: kind,
+            ml: ml,
+            startedAtMs: startedAtMs,
+            tzOffsetMin: local.timeZoneOffset.inMinutes,
+            localDay: dayKey(local),
+            beforeMl: Value((levelBeforePct / 100 * capacityMl).round()),
+            afterMl: Value((levelAfterPct / 100 * capacityMl).round()),
+            capacityMl: Value(capacityMl),
+            levelBeforePct: Value(levelBeforePct),
+            levelAfterPct: Value(levelAfterPct),
+            timeEstimated: Value(timeEstimated),
+            sawDrinking: Value(sawDrinking),
+            tooLong: Value(tooLong),
+            fwSeq: Value(seq),
+            fwKey: Value(dedupKey),
+            source: IntakeSource.firmware,
+            status: const Value(IntakeStatus.ok),
+            updatedAtMs: _nowMs,
+          ));
+      return (event: (await event(id))!, created: true);
+    });
+    if (result.created) notifyListeners();
+    return result;
+  }
+
   Future<IntakeEvent?> event(String id) =>
       (_db.select(_db.intakeEvents)..where((e) => e.id.equals(id)))
           .getSingleOrNull();
 
   /// 修改事件。改時間會一併更新 localDay / tzOffsetMin。
+  ///
+  /// 每次修改 updatedAtMs 一定比上一版大(同一毫秒內也是),並清掉同步狀態:
+  /// 照護系統以 `updated_at` 較新的為準,這一版要重新上傳。
   Future<void> updateEvent(
     String id, {
     int? ml,
@@ -180,20 +321,28 @@ class IntakeRepository extends ChangeNotifier {
     IntakeStatus? status,
   }) async {
     final local = startedAt?.toLocal();
-    await (_db.update(_db.intakeEvents)..where((e) => e.id.equals(id)))
-        .write(IntakeEventsCompanion(
-      ml: ml == null ? const Value.absent() : Value(ml),
-      kind: kind == null ? const Value.absent() : Value(kind),
-      status: status == null ? const Value.absent() : Value(status),
-      startedAtMs: local == null
-          ? const Value.absent()
-          : Value(local.millisecondsSinceEpoch),
-      tzOffsetMin: local == null
-          ? const Value.absent()
-          : Value(local.timeZoneOffset.inMinutes),
-      localDay: local == null ? const Value.absent() : Value(dayKey(local)),
-      updatedAtMs: Value(_nowMs),
-    ));
+    await _db.transaction(() async {
+      final existing = await event(id);
+      if (existing == null) return;
+      final now = _nowMs;
+      await (_db.update(_db.intakeEvents)..where((e) => e.id.equals(id)))
+          .write(IntakeEventsCompanion(
+        ml: ml == null ? const Value.absent() : Value(ml),
+        kind: kind == null ? const Value.absent() : Value(kind),
+        status: status == null ? const Value.absent() : Value(status),
+        startedAtMs: local == null
+            ? const Value.absent()
+            : Value(local.millisecondsSinceEpoch),
+        tzOffsetMin: local == null
+            ? const Value.absent()
+            : Value(local.timeZoneOffset.inMinutes),
+        localDay: local == null ? const Value.absent() : Value(dayKey(local)),
+        updatedAtMs: Value(
+            now > existing.updatedAtMs ? now : existing.updatedAtMs + 1),
+        syncedAtMs: const Value(null),
+        syncError: const Value(null),
+      ));
+    });
     notifyListeners();
   }
 
@@ -248,6 +397,99 @@ class IntakeRepository extends ChangeNotifier {
     return result;
   }
 
+  // ---------------------------------------------------------------- 同步
+
+  /// 還沒上傳照護系統的事件(含軟刪除),依 updatedAtMs 由舊到新,最多 [limit] 筆。
+  ///
+  /// - 只取已連結的水杯 [cupId] 的紀錄,以及手動輸入(沒有水杯)的紀錄。
+  /// - 標成不需同步(`syncExcluded`,見 [excludeAllFromSync])的不上傳。
+  /// - 被照護系統拒收(`syncError` 有值)的不再重送,直到紀錄再被修改。
+  Future<List<IntakeEvent>> pendingSyncEvents({
+    required String cupId,
+    int limit = 200,
+  }) =>
+      (_db.select(_db.intakeEvents)
+            ..where((e) => _pendingSync(e, cupId))
+            ..orderBy([
+              (e) => OrderingTerm.asc(e.updatedAtMs),
+              (e) => OrderingTerm.asc(e.id),
+            ])
+            ..limit(limit))
+          .get();
+
+  /// [pendingSyncEvents] 的總筆數(不受 limit 限制)。
+  Future<int> pendingSyncCount({required String cupId}) async {
+    final count = _db.intakeEvents.id.count();
+    final row = await (_db.selectOnly(_db.intakeEvents)
+          ..addColumns([count])
+          ..where(_pendingSync(_db.intakeEvents, cupId)))
+        .getSingle();
+    return row.read(count) ?? 0;
+  }
+
+  /// 被照護系統拒收、目前沒有上傳的紀錄筆數(`syncError` 有值;修改後會重新排入)。
+  Future<int> rejectedSyncCount({required String cupId}) async {
+    final e = _db.intakeEvents;
+    final count = e.id.count();
+    final row = await (_db.selectOnly(e)
+          ..addColumns([count])
+          ..where(e.drinkerId.equals(defaultDrinkerId) &
+              e.syncedAtMs.isNull() &
+              e.syncError.isNotNull() &
+              (e.syncExcluded.isNull() | e.syncExcluded.equals(false)) &
+              (e.cupId.isNull() | e.cupId.equals(cupId))))
+        .getSingle();
+    return row.read(count) ?? 0;
+  }
+
+  Expression<bool> _pendingSync($IntakeEventsTable e, String cupId) =>
+      e.drinkerId.equals(defaultDrinkerId) &
+      e.syncedAtMs.isNull() &
+      e.syncError.isNull() &
+      (e.syncExcluded.isNull() | e.syncExcluded.equals(false)) &
+      (e.cupId.isNull() | e.cupId.equals(cupId));
+
+  /// 把本機現有的紀錄全部標成不需同步(已經上傳過的也算),之後再修改也不會上傳。
+  /// 回傳這次標了幾筆。
+  ///
+  /// 連結到「和上次不同的住民」(或第一次連結)核准的當下呼叫:Server 會收下早於
+  /// 綁定時間的事件並算在 token 所屬的住民身上,連結之前的紀錄不可以算到他頭上。
+  /// 重新連結到同一位住民時不要呼叫,沒上傳的紀錄才會補傳。
+  Future<int> excludeAllFromSync() =>
+      (_db.update(_db.intakeEvents)
+            ..where((e) =>
+                e.syncExcluded.isNull() | e.syncExcluded.equals(false)))
+          .write(const IntakeEventsCompanion(syncExcluded: Value(true)));
+
+  /// 上傳成功:把這些版本標成已同步。上傳途中又被修改的紀錄(updatedAtMs 已經不同)
+  /// 不會被標記,下一輪再上傳新的版本。回傳實際標記的筆數。
+  ///
+  /// 不會 [notifyListeners]:同步狀態不影響畫面上的紀錄,也避免「同步 → 通知 → 再同步」。
+  Future<int> markSynced(Iterable<SyncedVersion> versions) async {
+    final now = _nowMs;
+    var marked = 0;
+    await _db.transaction(() async {
+      for (final v in versions) {
+        marked += await (_db.update(_db.intakeEvents)
+              ..where((e) =>
+                  e.id.equals(v.id) & e.updatedAtMs.equals(v.updatedAtMs)))
+            .write(IntakeEventsCompanion(
+          syncedAtMs: Value(now),
+          syncError: const Value(null),
+        ));
+      }
+    });
+    return marked;
+  }
+
+  /// 照護系統拒收這一版紀錄(例如 INVALID_EVENT):記下原因、移出上傳佇列,
+  /// 不擋住後面的紀錄。紀錄之後再被修改會重新排入。
+  Future<void> markSyncRejected(String id, int updatedAtMs, String error) async {
+    await (_db.update(_db.intakeEvents)
+          ..where((e) => e.id.equals(id) & e.updatedAtMs.equals(updatedAtMs)))
+        .write(IntakeEventsCompanion(syncError: Value(error)));
+  }
+
   // ---------------------------------------------------------------- 備份
 
   /// 所有事件(含已刪除),依時間排序,匯出用。
@@ -265,8 +507,15 @@ class IntakeRepository extends ChangeNotifier {
         if (existing != null && existing.updatedAtMs >= e.updatedAtMs) {
           continue;
         }
-        // 匯入的資料一律歸到本機的飲用者。
-        final row = e.copyWith(drinkerId: defaultDrinkerId);
+        // 匯入的資料一律歸到本機的飲用者;別台裝置的同步狀態不沿用。
+        // 新加入的紀錄不上傳照護系統(不知道是誰的,也可能早就由另一台裝置上傳過);
+        // 本機已有的紀錄維持原本的設定。
+        final row = e.copyWith(
+          drinkerId: defaultDrinkerId,
+          syncedAtMs: const Value(null),
+          syncError: const Value(null),
+          syncExcluded: Value(existing == null ? true : existing.syncExcluded),
+        );
         if (existing == null) {
           // 同一水杯同一時間已有事件(例如韌體補傳過)就略過。
           if (row.cupId != null &&
@@ -274,6 +523,17 @@ class IntakeRepository extends ChangeNotifier {
                         ..where((x) =>
                             x.cupId.equals(row.cupId!) &
                             x.startedAtMs.equals(row.startedAtMs)))
+                      .getSingleOrNull() !=
+                  null) {
+            continue;
+          }
+          // 同一筆韌體事件(同水杯、同去重鍵)已經在本機 → 略過。
+          if (row.cupId != null &&
+              row.fwKey != null &&
+              await (_db.select(_db.intakeEvents)
+                        ..where((x) =>
+                            x.cupId.equals(row.cupId!) &
+                            x.fwKey.equals(row.fwKey!)))
                       .getSingleOrNull() !=
                   null) {
             continue;

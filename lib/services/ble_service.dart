@@ -209,6 +209,85 @@ class StatePacket extends CupDataPacket {
   final int secondsInState;
 }
 
+/// 韌體事件的種類(type 0x07 的 bits 17..16)。
+enum FirmwareEventKind {
+  /// 喝水:水位下降。
+  drink,
+
+  /// 加水:水位上升。
+  refill,
+
+  /// 保留值(2、3),目前的韌體不會送。
+  unknown;
+
+  static FirmwareEventKind fromCode(int code) => switch (code) {
+        0 => FirmwareEventKind.drink,
+        1 => FirmwareEventKind.refill,
+        _ => FirmwareEventKind.unknown,
+      };
+
+  String get label => switch (this) {
+        FirmwareEventKind.drink => '喝水',
+        FirmwareEventKind.refill => '加水',
+        FirmwareEventKind.unknown => '未知事件',
+      };
+}
+
+/// type 0x07:韌體偵測到的喝水/加水事件(韌體 0.3.0 起)。
+///
+/// 連線中即時送出,斷線時存在水杯的 flash、重新訂閱後補傳。App 把事件存進資料庫後
+/// 要回 3-byte ACK(`[0x07, seq 低 8 bits, seq 高 3 bits]`),韌體收到才從 flash 刪除;
+/// ACK 晚到時同一筆會重送,用 [dedupKey] 去重,重複收到也要再回 ACK。
+///
+/// [timestamp] 是事件「開始」的時間,不是送出的時間;[timeUnknown] 時為 0。
+class DrinkEventPacket extends CupDataPacket {
+  const DrinkEventPacket({
+    required this.beforeHalfPercent,
+    required this.afterHalfPercent,
+    required this.kind,
+    required this.sawDrinking,
+    required this.tooLong,
+    required this.timeUnknown,
+    required this.seq,
+    required super.timestamp,
+  });
+
+  /// 水位欄位的上限:200 = 100%(單位 0.5%)。
+  static const int maxHalfPercent = 200;
+
+  /// seq 的上限(11 bits,0..2047 循環)。
+  static const int maxSeq = 0x7FF;
+
+  /// 事件前的水位 A,單位 0.5%,0..[maxHalfPercent]。
+  final int beforeHalfPercent;
+
+  /// 事件後的水位 B,單位 0.5%,0..[maxHalfPercent]。
+  final int afterHalfPercent;
+  final FirmwareEventKind kind;
+
+  /// 過程中出現過「飲用中」姿態。用吸管喝時為 false,一樣算喝水。
+  final bool sawDrinking;
+
+  /// 過程超過 10 分鐘。
+  final bool tooLong;
+
+  /// 時間不可信(對時前、上一次開機留下的事件):[timestamp] 為 0,
+  /// App 改用收到的時間並記成「時間為估計」。
+  final bool timeUnknown;
+
+  /// 流水號 0..[maxSeq],ACK 用;清空 flash 後會從 0 重新開始。
+  final int seq;
+
+  /// 水位 A / B 的百分比 0.0..100.0。
+  double get beforePercent => beforeHalfPercent / 2;
+  double get afterPercent => afterHalfPercent / 2;
+
+  /// 去重鍵:seq + 時間戳 + A/B。同一筆事件重送時完全相同(包含 [timeUnknown]
+  /// 的事件:時間戳固定為 0,不受每次收到的時間影響)。
+  String get dedupKey =>
+      '$seq:$timestamp:$beforeHalfPercent:$afterHalfPercent';
+}
+
 /// 未知 message type:保留原始 value,不中斷資料流。
 class UnknownPacket extends CupDataPacket {
   const UnknownPacket({
@@ -221,14 +300,65 @@ class UnknownPacket extends CupDataPacket {
   final int value;
 }
 
-/// Device Status(暫定格式,見 `cup_protocol.dart`)。
+/// 韌體版本(Device Status 的 Byte 1..3)。
+class FirmwareVersion implements Comparable<FirmwareVersion> {
+  const FirmwareVersion(this.major, this.minor, this.patch);
+
+  /// 從這一版起由韌體偵測喝水/加水並送 DRINK_EVENT(0x07)。
+  static const drinkEvents = FirmwareVersion(0, 3, 0);
+
+  final int major;
+  final int minor;
+  final int patch;
+
+  @override
+  int compareTo(FirmwareVersion other) {
+    if (major != other.major) return major.compareTo(other.major);
+    if (minor != other.minor) return minor.compareTo(other.minor);
+    return patch.compareTo(other.patch);
+  }
+
+  bool operator >=(FirmwareVersion other) => compareTo(other) >= 0;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FirmwareVersion &&
+      other.major == major &&
+      other.minor == minor &&
+      other.patch == patch;
+
+  @override
+  int get hashCode => Object.hash(major, minor, patch);
+
+  @override
+  String toString() => '$major.$minor.$patch';
+}
+
+/// Device Status(格式見 `cup_protocol.dart`)。
 class DeviceStatus {
-  const DeviceStatus({required this.batteryPercent});
+  const DeviceStatus({
+    required this.batteryPercent,
+    this.firmwareVersion,
+    this.bleAddress,
+  });
 
   /// 電量 0..100 %;未知(韌體送 0xFF,例如沒接電池)時為 null。
   final int? batteryPercent;
 
+  /// 韌體版本;沒有讀到 Device Status 時為 null。
+  final FirmwareVersion? firmwareVersion;
+
+  /// 水杯的 BLE 位址(大寫、冒號分隔,例如 `58:E6:C5:12:E0:CE`),韌體 0.4.0 起提供;
+  /// 舊韌體為 null。iOS 拿不到 BLE 位址,只能靠這個當 `cup_hardware_id`。
+  final String? bleAddress;
+
   bool get batteryKnown => batteryPercent != null;
+
+  /// 韌體是否自己偵測喝水(版本 ≥ 0.3.0)。是的話 App 要關掉自己的偵測,否則重複計算。
+  bool get firmwareDetectsDrinks {
+    final v = firmwareVersion;
+    return v != null && v >= FirmwareVersion.drinkEvents;
+  }
 }
 
 enum BleErrorCode {
@@ -283,6 +413,9 @@ abstract interface class BleService {
   Future<void> writeTimeSync(int unixTimestamp);
 
   Future<void> writeAck();
+
+  /// 確認一筆 DRINK_EVENT(0x07):寫入 3-byte ACK,韌體收到才從 flash 刪除該事件。
+  Future<void> writeDrinkEventAck(int seq);
 
   Stream<CupDataPacket> get dataNotifications;
 

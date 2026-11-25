@@ -23,8 +23,9 @@ class IntakeEventDelete extends IntakeEventDialogResult {
   const IntakeEventDelete();
 }
 
-/// 單次最多可輸入的毫升數。
-const maxEventMl = 3000;
+/// 單次最多可輸入的毫升數。和照護系統 `cup/events/` 的上限一致(合約 §2.2:ml 0–2000),
+/// 超過的紀錄會被伺服器拒收。
+const maxEventMl = 2000;
 
 String intakeKindLabel(IntakeKind k) => switch (k) {
       IntakeKind.drink => '喝水',

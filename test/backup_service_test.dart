@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stut_food_intake_project/data/intake_repository.dart';
@@ -78,7 +78,17 @@ void main() {
       expect(result.cupsChanged, 1);
       expect(result.goalChanged, isTrue);
       expect(dst.dailyGoalMl, 2200);
-      expect(await dst.allEvents(), await src.allEvents());
+      // 紀錄的內容完全相同。同步狀態是每台裝置自己的,不比較:匯入的紀錄一律標成
+      // 不上傳照護系統(不知道是誰的,也可能早就由另一台裝置上傳過)。
+      IntakeEvent content(IntakeEvent e) => e.copyWith(
+            syncedAtMs: const Value(null),
+            syncError: const Value(null),
+            syncExcluded: const Value(null),
+          );
+      expect((await dst.allEvents()).map(content).toList(),
+          (await src.allEvents()).map(content).toList());
+      expect((await dst.allEvents()).every((e) => e.syncExcluded == true), isTrue);
+      expect((await src.allEvents()).every((e) => e.syncExcluded == null), isTrue);
       expect(await dst.cups(), await src.cups());
       // 已刪除的事件也有帶過去。
       expect(

@@ -5,9 +5,12 @@ import 'package:flutter/services.dart';
 
 import '../data/intake_repository.dart';
 import '../services/backup_service.dart';
+import '../state/care_link_manager.dart';
+import '../state/care_sync.dart';
+import 'care_link_panel.dart';
 import 'theme.dart';
 
-/// 設定:每日目標、水杯容量、資料備份(匯出/匯入)。
+/// 設定:每日目標、水杯容量、照護系統(連結/解除)、資料備份(匯出/匯入)。
 ///
 /// 和其他分頁一樣只是內容(ListView),需要放在有 [Scaffold] 的畫面裡才能顯示 SnackBar。
 class SettingsPage extends StatefulWidget {
@@ -16,9 +19,17 @@ class SettingsPage extends StatefulWidget {
     required this.repo,
     this.fileIO = const PlatformBackupFileIO(),
     this.clock,
+    this.care,
+    this.careSync,
   });
 
   final IntakeRepository repo;
+
+  /// 照護系統的連結狀態;有傳入才顯示「照護系統」區塊。
+  final CareLinkManager? care;
+
+  /// 照護系統的背景同步(顯示待上傳筆數、「立即同步」)。
+  final CareSync? careSync;
 
   /// 檔案存取;測試時換成假的。
   final BackupFileIO fileIO;
@@ -97,6 +108,10 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: 12),
         _cupsPanel(),
         const SizedBox(height: 12),
+        if (widget.care != null) ...[
+          CareLinkPanel(care: widget.care!, sync: widget.careSync),
+          const SizedBox(height: 12),
+        ],
         _backupPanel(),
       ],
     );
@@ -105,6 +120,10 @@ class _SettingsPageState extends State<SettingsPage> {
   // ---------------------------------------------------------------- 每日目標
 
   Widget _goalPanel() {
+    // 已連結照護系統:目標以 Server 為準,這裡只顯示、不能改。Server 還沒設定時
+    // 顯示「照護系統尚未設定目標」,不套用任何預設值。
+    final fromServer = _repo.goalFromServer;
+    final goal = _repo.goalMl;
     return Panel(
       padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
       child: Column(
@@ -116,12 +135,18 @@ class _SettingsPageState extends State<SettingsPage> {
             contentPadding: const EdgeInsets.only(right: 8),
             leading: const Icon(Icons.flag_outlined, color: AppColors.teal),
             title: Text(
-              '${_repo.dailyGoalMl} mL',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+              goal == null ? '照護系統尚未設定目標' : '$goal mL',
+              style: TextStyle(
+                fontSize: goal == null ? 16 : 20,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            subtitle: const Text('一般成人建議每天 1500–2500 mL', style: mutedSmall),
-            trailing: const Icon(Icons.edit_outlined, size: 20),
-            onTap: _editGoal,
+            subtitle: Text(
+              fromServer ? '由照護系統設定,無法在這裡修改' : '一般成人建議每天 1500–2500 mL',
+              style: mutedSmall,
+            ),
+            trailing: fromServer ? null : const Icon(Icons.edit_outlined, size: 20),
+            onTap: fromServer ? null : _editGoal,
           ),
         ],
       ),
@@ -137,6 +162,11 @@ class _SettingsPageState extends State<SettingsPage> {
       max: SettingsPage.maxGoalMl,
     );
     if (ml == null || ml == _repo.dailyGoalMl) return;
+    // 對話框開著的時候剛好連結成功 → 目標已經改由照護系統設定。
+    if (_repo.goalFromServer) {
+      _snack('已連結照護系統,每日目標由照護系統設定');
+      return;
+    }
     await _repo.setDailyGoal(ml);
     _snack('每日目標已改為 $ml mL');
   }
@@ -218,7 +248,12 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           const _SectionTitle('資料備份'),
           const SizedBox(height: 4),
-          const Text('紀錄只存在這台裝置上,解除安裝 App 會一併刪除,請定期匯出備份檔。', style: mutedSmall),
+          Text(
+            widget.care?.isLinked ?? false
+                ? '連結照護系統後,新的紀錄會另外上傳一份;這台裝置上的紀錄在解除安裝 App 時仍會一併刪除,請定期匯出備份檔。'
+                : '紀錄只存在這台裝置上,解除安裝 App 會一併刪除,請定期匯出備份檔。',
+            style: mutedSmall,
+          ),
           const SizedBox(height: 12),
           _backupButton(
             task: _BackupTask.csv,
@@ -334,7 +369,7 @@ class _SettingsPageState extends State<SettingsPage> {
             '備份檔的紀錄會合併到這台裝置:\n'
             '・新的紀錄會加入,同一筆紀錄以較新的版本為準\n'
             '・這台裝置上現有的紀錄不會被刪除\n'
-            '・每日目標會改成備份檔裡的設定',
+            '・每日目標會改成備份檔裡的設定(已連結照護系統時不會改)',
           ),
         ),
         actions: [

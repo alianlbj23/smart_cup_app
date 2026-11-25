@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 照護系統:上傳飲水紀錄、讀取每日目標(HTTPS)。沒有這個權限 release 版連不上網 -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- BLE 權限(規格書 §7)-->
     <!-- Android 12+:neverForLocation 表示不以掃描結果推算位置,因此不需定位權限 -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"

@@ -45,10 +45,14 @@ class CupProtocol {
   static const int msgTypePose = 0x04;
   static const int msgTypeAttitude = 0x05;
   static const int msgTypeState = 0x06;
+  static const int msgTypeDrinkEvent = 0x07;
 
   static const int ackReceivedOk = 0x01;
 
   static const int deviceStatusLength = 4;
+
+  /// Device Status 帶 BLE 位址時的最小長度(韌體 0.4.0:4 + 6 bytes)。
+  static const int deviceStatusWithAddressLength = 10;
 
   /// Device Status Byte 0 的特殊值:電量未知(例如沒接電池)。
   static const int batteryUnknown = 0xFF;
@@ -62,6 +66,11 @@ class CupProtocol {
   /// ACK:Byte 0 = ACK type。
   static List<int> encodeAck([int type = ackReceivedOk]) => [type];
 
+  /// DRINK_EVENT 的 ACK(3 bytes):`[0x07, seq 低 8 bits, seq 高 3 bits]`。
+  /// 韌體收到 seq 相符的 ACK 才把事件從 flash 刪除。
+  static List<int> encodeDrinkEventAck(int seq) =>
+      [msgTypeDrinkEvent, seq & 0xFF, (seq >> 8) & 0x07];
+
   /// Data Notify:type(1) + value(4) + timestamp(4) = 9 bytes。
   ///
   /// value 的位元配置依 message type 而異(韌體 smart_cup_firmware 的
@@ -71,6 +80,9 @@ class CupProtocol {
   /// - 0x04 POSE    :bits 15..0 傾斜角 0.1 度,bits 23..16 姿態,bits 31..24 移動
   /// - 0x05 ATTITUDE:bits 15..0 pitch、bits 31..16 roll,皆為 int16、0.1 度
   /// - 0x06 STATE   :bits 7..0 狀態(0 活動中 / 1 休眠中),bits 31..8 進入該狀態秒數(uint24)
+  /// - 0x07 DRINK_EVENT:bits 7..0 水位 A、bits 15..8 水位 B(單位 0.5%,0..200),
+  ///   bits 17..16 種類(0 喝水 / 1 加水),bit 18 saw_drinking,bit 19 too_long,
+  ///   bit 20 time_unknown,bits 31..21 seq(11 bits)。timestamp = 事件開始時間
   ///
   /// 長度不符時丟出 [FormatException];未知 type 回傳 [UnknownPacket]。
   static CupDataPacket decodeData(List<int> raw) {
@@ -114,6 +126,19 @@ class CupProtocol {
           secondsInState: (value >> 8) & StatePacket.maxSecondsInState,
           timestamp: timestamp,
         );
+      case msgTypeDrinkEvent:
+        return DrinkEventPacket(
+          beforeHalfPercent:
+              (value & 0xFF).clamp(0, DrinkEventPacket.maxHalfPercent),
+          afterHalfPercent:
+              ((value >> 8) & 0xFF).clamp(0, DrinkEventPacket.maxHalfPercent),
+          kind: FirmwareEventKind.fromCode((value >> 16) & 0x03),
+          sawDrinking: (value >> 18) & 1 == 1,
+          tooLong: (value >> 19) & 1 == 1,
+          timeUnknown: (value >> 20) & 1 == 1,
+          seq: (value >> 21) & DrinkEventPacket.maxSeq,
+          timestamp: timestamp,
+        );
       default:
         return UnknownPacket(type: type, value: value, timestamp: timestamp);
     }
@@ -124,12 +149,13 @@ class CupProtocol {
       .toSigned(16)
       .clamp(-AttitudePacket.maxDeciDegrees, AttitudePacket.maxDeciDegrees);
 
-  /// Device Status(規格書未定義,本階段暫定格式,韌體需同步):
+  /// Device Status(韌體 README 第 5 節、合約 §1.1):
   /// Byte 0 = 電量 %(uint8,[batteryUnknown] 代表未知),
-  /// Byte 1-3 = 裝置端版本號(App 不使用)。
+  /// Byte 1-3 = 韌體版本 major、minor、patch,
+  /// Byte 4-9 = 水杯的 BLE 位址(韌體 0.4.0 起;顯示順序,最高位元組在前)。
   ///
   /// 0..100 以外的電量值(含 0xFF)都視為未知,不會顯示成 255% 之類的數字。
-  // TODO: 正式格式確定後更新。
+  /// 長度不到 [deviceStatusWithAddressLength](舊韌體)時沒有 BLE 位址。
   static DeviceStatus decodeDeviceStatus(List<int> raw) {
     if (raw.length < deviceStatusLength) {
       throw FormatException(
@@ -137,6 +163,23 @@ class CupProtocol {
       );
     }
     final battery = raw[0] & 0xFF;
-    return DeviceStatus(batteryPercent: battery <= 100 ? battery : null);
+    return DeviceStatus(
+      batteryPercent: battery <= 100 ? battery : null,
+      firmwareVersion:
+          FirmwareVersion(raw[1] & 0xFF, raw[2] & 0xFF, raw[3] & 0xFF),
+      bleAddress: raw.length >= deviceStatusWithAddressLength
+          ? _bleAddress(raw.sublist(deviceStatusLength,
+              deviceStatusWithAddressLength))
+          : null,
+    );
+  }
+
+  /// 6 bytes → `58:E6:C5:12:E0:CE`。全 0 或全 FF(韌體沒填)視為沒有位址。
+  static String? _bleAddress(List<int> bytes) {
+    final b = [for (final v in bytes) v & 0xFF];
+    if (b.every((v) => v == 0x00) || b.every((v) => v == 0xFF)) return null;
+    return b
+        .map((v) => v.toRadixString(16).padLeft(2, '0').toUpperCase())
+        .join(':');
   }
 }

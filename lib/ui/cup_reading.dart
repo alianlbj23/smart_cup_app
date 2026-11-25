@@ -153,10 +153,19 @@ String describePacket(CupDataPacket p) => switch (p) {
         '姿態角 pitch ${p.pitchDegrees.toStringAsFixed(1)}° · '
             'roll ${p.rollDegrees.toStringAsFixed(1)}°',
       StatePacket() => describeState(p),
+      DrinkEventPacket() => describeDrinkEvent(p),
       DummyDataPacket() => '測試值 ${p.value}',
       UnknownPacket() =>
         '未知 type 0x${p.type.toRadixString(16)} · ${p.value}',
     };
+
+/// DRINK_EVENT 在接收紀錄的文字,例如「喝水 62.0% → 55.5% · seq 12」。
+String describeDrinkEvent(DrinkEventPacket p) => [
+      '${p.kind.label} ${p.beforePercent.toStringAsFixed(1)}% → '
+          '${p.afterPercent.toStringAsFixed(1)}%',
+      'seq ${p.seq}',
+      if (p.timeUnknown) '時間未知',
+    ].join(' · ');
 
 /// STATE 封包在接收紀錄的文字:只記狀態,不記時間長度
 /// (休眠中的 keepalive 不會寫進紀錄,見 CupConnectionManager)。

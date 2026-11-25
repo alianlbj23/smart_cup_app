@@ -60,6 +60,17 @@ class $CupsTable extends Cups with TableInfo<$CupsTable, CupRow> {
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _bleAddressMeta = const VerificationMeta(
+    'bleAddress',
+  );
+  @override
+  late final GeneratedColumn<String> bleAddress = GeneratedColumn<String>(
+    'ble_address',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -67,6 +78,7 @@ class $CupsTable extends Cups with TableInfo<$CupsTable, CupRow> {
     capacityMl,
     createdAtMs,
     updatedAtMs,
+    bleAddress,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -121,6 +133,12 @@ class $CupsTable extends Cups with TableInfo<$CupsTable, CupRow> {
     } else if (isInserting) {
       context.missing(_updatedAtMsMeta);
     }
+    if (data.containsKey('ble_address')) {
+      context.handle(
+        _bleAddressMeta,
+        bleAddress.isAcceptableOrUnknown(data['ble_address']!, _bleAddressMeta),
+      );
+    }
     return context;
   }
 
@@ -150,6 +168,10 @@ class $CupsTable extends Cups with TableInfo<$CupsTable, CupRow> {
         DriftSqlType.int,
         data['${effectivePrefix}updated_at_ms'],
       )!,
+      bleAddress: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}ble_address'],
+      ),
     );
   }
 
@@ -168,12 +190,17 @@ class CupRow extends DataClass implements Insertable<CupRow> {
   final int capacityMl;
   final int createdAtMs;
   final int updatedAtMs;
+
+  /// 水杯自己回報的 BLE 位址(Device Status,韌體 0.4.0 起),例如 `58:E6:C5:12:E0:CE`。
+  /// 連結照護系統時當作 `cup_hardware_id`;舊韌體為 null,改用 [id]。
+  final String? bleAddress;
   const CupRow({
     required this.id,
     required this.name,
     required this.capacityMl,
     required this.createdAtMs,
     required this.updatedAtMs,
+    this.bleAddress,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -183,6 +210,9 @@ class CupRow extends DataClass implements Insertable<CupRow> {
     map['capacity_ml'] = Variable<int>(capacityMl);
     map['created_at_ms'] = Variable<int>(createdAtMs);
     map['updated_at_ms'] = Variable<int>(updatedAtMs);
+    if (!nullToAbsent || bleAddress != null) {
+      map['ble_address'] = Variable<String>(bleAddress);
+    }
     return map;
   }
 
@@ -193,6 +223,9 @@ class CupRow extends DataClass implements Insertable<CupRow> {
       capacityMl: Value(capacityMl),
       createdAtMs: Value(createdAtMs),
       updatedAtMs: Value(updatedAtMs),
+      bleAddress: bleAddress == null && nullToAbsent
+          ? const Value.absent()
+          : Value(bleAddress),
     );
   }
 
@@ -207,6 +240,7 @@ class CupRow extends DataClass implements Insertable<CupRow> {
       capacityMl: serializer.fromJson<int>(json['capacityMl']),
       createdAtMs: serializer.fromJson<int>(json['createdAtMs']),
       updatedAtMs: serializer.fromJson<int>(json['updatedAtMs']),
+      bleAddress: serializer.fromJson<String?>(json['bleAddress']),
     );
   }
   @override
@@ -218,6 +252,7 @@ class CupRow extends DataClass implements Insertable<CupRow> {
       'capacityMl': serializer.toJson<int>(capacityMl),
       'createdAtMs': serializer.toJson<int>(createdAtMs),
       'updatedAtMs': serializer.toJson<int>(updatedAtMs),
+      'bleAddress': serializer.toJson<String?>(bleAddress),
     };
   }
 
@@ -227,12 +262,14 @@ class CupRow extends DataClass implements Insertable<CupRow> {
     int? capacityMl,
     int? createdAtMs,
     int? updatedAtMs,
+    Value<String?> bleAddress = const Value.absent(),
   }) => CupRow(
     id: id ?? this.id,
     name: name ?? this.name,
     capacityMl: capacityMl ?? this.capacityMl,
     createdAtMs: createdAtMs ?? this.createdAtMs,
     updatedAtMs: updatedAtMs ?? this.updatedAtMs,
+    bleAddress: bleAddress.present ? bleAddress.value : this.bleAddress,
   );
   CupRow copyWithCompanion(CupsCompanion data) {
     return CupRow(
@@ -247,6 +284,9 @@ class CupRow extends DataClass implements Insertable<CupRow> {
       updatedAtMs: data.updatedAtMs.present
           ? data.updatedAtMs.value
           : this.updatedAtMs,
+      bleAddress: data.bleAddress.present
+          ? data.bleAddress.value
+          : this.bleAddress,
     );
   }
 
@@ -257,14 +297,15 @@ class CupRow extends DataClass implements Insertable<CupRow> {
           ..write('name: $name, ')
           ..write('capacityMl: $capacityMl, ')
           ..write('createdAtMs: $createdAtMs, ')
-          ..write('updatedAtMs: $updatedAtMs')
+          ..write('updatedAtMs: $updatedAtMs, ')
+          ..write('bleAddress: $bleAddress')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode =>
-      Object.hash(id, name, capacityMl, createdAtMs, updatedAtMs);
+      Object.hash(id, name, capacityMl, createdAtMs, updatedAtMs, bleAddress);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -273,7 +314,8 @@ class CupRow extends DataClass implements Insertable<CupRow> {
           other.name == this.name &&
           other.capacityMl == this.capacityMl &&
           other.createdAtMs == this.createdAtMs &&
-          other.updatedAtMs == this.updatedAtMs);
+          other.updatedAtMs == this.updatedAtMs &&
+          other.bleAddress == this.bleAddress);
 }
 
 class CupsCompanion extends UpdateCompanion<CupRow> {
@@ -282,6 +324,7 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
   final Value<int> capacityMl;
   final Value<int> createdAtMs;
   final Value<int> updatedAtMs;
+  final Value<String?> bleAddress;
   final Value<int> rowid;
   const CupsCompanion({
     this.id = const Value.absent(),
@@ -289,6 +332,7 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
     this.capacityMl = const Value.absent(),
     this.createdAtMs = const Value.absent(),
     this.updatedAtMs = const Value.absent(),
+    this.bleAddress = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CupsCompanion.insert({
@@ -297,6 +341,7 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
     this.capacityMl = const Value.absent(),
     required int createdAtMs,
     required int updatedAtMs,
+    this.bleAddress = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -308,6 +353,7 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
     Expression<int>? capacityMl,
     Expression<int>? createdAtMs,
     Expression<int>? updatedAtMs,
+    Expression<String>? bleAddress,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -316,6 +362,7 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
       if (capacityMl != null) 'capacity_ml': capacityMl,
       if (createdAtMs != null) 'created_at_ms': createdAtMs,
       if (updatedAtMs != null) 'updated_at_ms': updatedAtMs,
+      if (bleAddress != null) 'ble_address': bleAddress,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -326,6 +373,7 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
     Value<int>? capacityMl,
     Value<int>? createdAtMs,
     Value<int>? updatedAtMs,
+    Value<String?>? bleAddress,
     Value<int>? rowid,
   }) {
     return CupsCompanion(
@@ -334,6 +382,7 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
       capacityMl: capacityMl ?? this.capacityMl,
       createdAtMs: createdAtMs ?? this.createdAtMs,
       updatedAtMs: updatedAtMs ?? this.updatedAtMs,
+      bleAddress: bleAddress ?? this.bleAddress,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -356,6 +405,9 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
     if (updatedAtMs.present) {
       map['updated_at_ms'] = Variable<int>(updatedAtMs.value);
     }
+    if (bleAddress.present) {
+      map['ble_address'] = Variable<String>(bleAddress.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -370,6 +422,7 @@ class CupsCompanion extends UpdateCompanion<CupRow> {
           ..write('capacityMl: $capacityMl, ')
           ..write('createdAtMs: $createdAtMs, ')
           ..write('updatedAtMs: $updatedAtMs, ')
+          ..write('bleAddress: $bleAddress, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -423,8 +476,41 @@ class $DrinkersTable extends Drinkers
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _goalFromServerMeta = const VerificationMeta(
+    'goalFromServer',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, name, dailyGoalMl, updatedAtMs];
+  late final GeneratedColumn<bool> goalFromServer = GeneratedColumn<bool>(
+    'goal_from_server',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("goal_from_server" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _serverGoalMlMeta = const VerificationMeta(
+    'serverGoalMl',
+  );
+  @override
+  late final GeneratedColumn<int> serverGoalMl = GeneratedColumn<int>(
+    'server_goal_ml',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    dailyGoalMl,
+    updatedAtMs,
+    goalFromServer,
+    serverGoalMl,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -470,6 +556,24 @@ class $DrinkersTable extends Drinkers
     } else if (isInserting) {
       context.missing(_updatedAtMsMeta);
     }
+    if (data.containsKey('goal_from_server')) {
+      context.handle(
+        _goalFromServerMeta,
+        goalFromServer.isAcceptableOrUnknown(
+          data['goal_from_server']!,
+          _goalFromServerMeta,
+        ),
+      );
+    }
+    if (data.containsKey('server_goal_ml')) {
+      context.handle(
+        _serverGoalMlMeta,
+        serverGoalMl.isAcceptableOrUnknown(
+          data['server_goal_ml']!,
+          _serverGoalMlMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -495,6 +599,14 @@ class $DrinkersTable extends Drinkers
         DriftSqlType.int,
         data['${effectivePrefix}updated_at_ms'],
       )!,
+      goalFromServer: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}goal_from_server'],
+      )!,
+      serverGoalMl: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}server_goal_ml'],
+      ),
     );
   }
 
@@ -507,13 +619,25 @@ class $DrinkersTable extends Drinkers
 class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
   final String id;
   final String name;
+
+  /// 每日目標(mL)。未連結照護系統時由使用者在「設定」修改;
+  /// 已連結且照護系統有設定目標時,會被改成照護系統的值。
   final int dailyGoalMl;
   final int updatedAtMs;
+
+  /// 已連結照護系統:每日目標以 Server 為準([serverGoalMl]),不能在 App 修改。
+  final bool goalFromServer;
+
+  /// 照護系統設定的每日目標(mL);[goalFromServer] 為 true 而此欄為 null
+  /// 代表「照護系統尚未設定目標」,不可以套用任何預設值。
+  final int? serverGoalMl;
   const DrinkerRow({
     required this.id,
     required this.name,
     required this.dailyGoalMl,
     required this.updatedAtMs,
+    required this.goalFromServer,
+    this.serverGoalMl,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -522,6 +646,10 @@ class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
     map['name'] = Variable<String>(name);
     map['daily_goal_ml'] = Variable<int>(dailyGoalMl);
     map['updated_at_ms'] = Variable<int>(updatedAtMs);
+    map['goal_from_server'] = Variable<bool>(goalFromServer);
+    if (!nullToAbsent || serverGoalMl != null) {
+      map['server_goal_ml'] = Variable<int>(serverGoalMl);
+    }
     return map;
   }
 
@@ -531,6 +659,10 @@ class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
       name: Value(name),
       dailyGoalMl: Value(dailyGoalMl),
       updatedAtMs: Value(updatedAtMs),
+      goalFromServer: Value(goalFromServer),
+      serverGoalMl: serverGoalMl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(serverGoalMl),
     );
   }
 
@@ -544,6 +676,8 @@ class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
       name: serializer.fromJson<String>(json['name']),
       dailyGoalMl: serializer.fromJson<int>(json['dailyGoalMl']),
       updatedAtMs: serializer.fromJson<int>(json['updatedAtMs']),
+      goalFromServer: serializer.fromJson<bool>(json['goalFromServer']),
+      serverGoalMl: serializer.fromJson<int?>(json['serverGoalMl']),
     );
   }
   @override
@@ -554,6 +688,8 @@ class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
       'name': serializer.toJson<String>(name),
       'dailyGoalMl': serializer.toJson<int>(dailyGoalMl),
       'updatedAtMs': serializer.toJson<int>(updatedAtMs),
+      'goalFromServer': serializer.toJson<bool>(goalFromServer),
+      'serverGoalMl': serializer.toJson<int?>(serverGoalMl),
     };
   }
 
@@ -562,11 +698,15 @@ class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
     String? name,
     int? dailyGoalMl,
     int? updatedAtMs,
+    bool? goalFromServer,
+    Value<int?> serverGoalMl = const Value.absent(),
   }) => DrinkerRow(
     id: id ?? this.id,
     name: name ?? this.name,
     dailyGoalMl: dailyGoalMl ?? this.dailyGoalMl,
     updatedAtMs: updatedAtMs ?? this.updatedAtMs,
+    goalFromServer: goalFromServer ?? this.goalFromServer,
+    serverGoalMl: serverGoalMl.present ? serverGoalMl.value : this.serverGoalMl,
   );
   DrinkerRow copyWithCompanion(DrinkersCompanion data) {
     return DrinkerRow(
@@ -578,6 +718,12 @@ class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
       updatedAtMs: data.updatedAtMs.present
           ? data.updatedAtMs.value
           : this.updatedAtMs,
+      goalFromServer: data.goalFromServer.present
+          ? data.goalFromServer.value
+          : this.goalFromServer,
+      serverGoalMl: data.serverGoalMl.present
+          ? data.serverGoalMl.value
+          : this.serverGoalMl,
     );
   }
 
@@ -587,13 +733,22 @@ class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('dailyGoalMl: $dailyGoalMl, ')
-          ..write('updatedAtMs: $updatedAtMs')
+          ..write('updatedAtMs: $updatedAtMs, ')
+          ..write('goalFromServer: $goalFromServer, ')
+          ..write('serverGoalMl: $serverGoalMl')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, dailyGoalMl, updatedAtMs);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    dailyGoalMl,
+    updatedAtMs,
+    goalFromServer,
+    serverGoalMl,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -601,7 +756,9 @@ class DrinkerRow extends DataClass implements Insertable<DrinkerRow> {
           other.id == this.id &&
           other.name == this.name &&
           other.dailyGoalMl == this.dailyGoalMl &&
-          other.updatedAtMs == this.updatedAtMs);
+          other.updatedAtMs == this.updatedAtMs &&
+          other.goalFromServer == this.goalFromServer &&
+          other.serverGoalMl == this.serverGoalMl);
 }
 
 class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
@@ -609,12 +766,16 @@ class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
   final Value<String> name;
   final Value<int> dailyGoalMl;
   final Value<int> updatedAtMs;
+  final Value<bool> goalFromServer;
+  final Value<int?> serverGoalMl;
   final Value<int> rowid;
   const DrinkersCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.dailyGoalMl = const Value.absent(),
     this.updatedAtMs = const Value.absent(),
+    this.goalFromServer = const Value.absent(),
+    this.serverGoalMl = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   DrinkersCompanion.insert({
@@ -622,6 +783,8 @@ class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
     required String name,
     this.dailyGoalMl = const Value.absent(),
     required int updatedAtMs,
+    this.goalFromServer = const Value.absent(),
+    this.serverGoalMl = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -631,6 +794,8 @@ class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
     Expression<String>? name,
     Expression<int>? dailyGoalMl,
     Expression<int>? updatedAtMs,
+    Expression<bool>? goalFromServer,
+    Expression<int>? serverGoalMl,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -638,6 +803,8 @@ class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
       if (name != null) 'name': name,
       if (dailyGoalMl != null) 'daily_goal_ml': dailyGoalMl,
       if (updatedAtMs != null) 'updated_at_ms': updatedAtMs,
+      if (goalFromServer != null) 'goal_from_server': goalFromServer,
+      if (serverGoalMl != null) 'server_goal_ml': serverGoalMl,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -647,6 +814,8 @@ class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
     Value<String>? name,
     Value<int>? dailyGoalMl,
     Value<int>? updatedAtMs,
+    Value<bool>? goalFromServer,
+    Value<int?>? serverGoalMl,
     Value<int>? rowid,
   }) {
     return DrinkersCompanion(
@@ -654,6 +823,8 @@ class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
       name: name ?? this.name,
       dailyGoalMl: dailyGoalMl ?? this.dailyGoalMl,
       updatedAtMs: updatedAtMs ?? this.updatedAtMs,
+      goalFromServer: goalFromServer ?? this.goalFromServer,
+      serverGoalMl: serverGoalMl ?? this.serverGoalMl,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -673,6 +844,12 @@ class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
     if (updatedAtMs.present) {
       map['updated_at_ms'] = Variable<int>(updatedAtMs.value);
     }
+    if (goalFromServer.present) {
+      map['goal_from_server'] = Variable<bool>(goalFromServer.value);
+    }
+    if (serverGoalMl.present) {
+      map['server_goal_ml'] = Variable<int>(serverGoalMl.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -686,6 +863,8 @@ class DrinkersCompanion extends UpdateCompanion<DrinkerRow> {
           ..write('name: $name, ')
           ..write('dailyGoalMl: $dailyGoalMl, ')
           ..write('updatedAtMs: $updatedAtMs, ')
+          ..write('goalFromServer: $goalFromServer, ')
+          ..write('serverGoalMl: $serverGoalMl, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -844,6 +1023,135 @@ class $IntakeEventsTable extends IntakeEvents
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _capacityMlMeta = const VerificationMeta(
+    'capacityMl',
+  );
+  @override
+  late final GeneratedColumn<int> capacityMl = GeneratedColumn<int>(
+    'capacity_ml',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _levelBeforePctMeta = const VerificationMeta(
+    'levelBeforePct',
+  );
+  @override
+  late final GeneratedColumn<double> levelBeforePct = GeneratedColumn<double>(
+    'level_before_pct',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _levelAfterPctMeta = const VerificationMeta(
+    'levelAfterPct',
+  );
+  @override
+  late final GeneratedColumn<double> levelAfterPct = GeneratedColumn<double>(
+    'level_after_pct',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _timeEstimatedMeta = const VerificationMeta(
+    'timeEstimated',
+  );
+  @override
+  late final GeneratedColumn<bool> timeEstimated = GeneratedColumn<bool>(
+    'time_estimated',
+    aliasedName,
+    true,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("time_estimated" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _sawDrinkingMeta = const VerificationMeta(
+    'sawDrinking',
+  );
+  @override
+  late final GeneratedColumn<bool> sawDrinking = GeneratedColumn<bool>(
+    'saw_drinking',
+    aliasedName,
+    true,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("saw_drinking" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _tooLongMeta = const VerificationMeta(
+    'tooLong',
+  );
+  @override
+  late final GeneratedColumn<bool> tooLong = GeneratedColumn<bool>(
+    'too_long',
+    aliasedName,
+    true,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("too_long" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _fwSeqMeta = const VerificationMeta('fwSeq');
+  @override
+  late final GeneratedColumn<int> fwSeq = GeneratedColumn<int>(
+    'fw_seq',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _fwKeyMeta = const VerificationMeta('fwKey');
+  @override
+  late final GeneratedColumn<String> fwKey = GeneratedColumn<String>(
+    'fw_key',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _syncedAtMsMeta = const VerificationMeta(
+    'syncedAtMs',
+  );
+  @override
+  late final GeneratedColumn<int> syncedAtMs = GeneratedColumn<int>(
+    'synced_at_ms',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _syncErrorMeta = const VerificationMeta(
+    'syncError',
+  );
+  @override
+  late final GeneratedColumn<String> syncError = GeneratedColumn<String>(
+    'sync_error',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _syncExcludedMeta = const VerificationMeta(
+    'syncExcluded',
+  );
+  @override
+  late final GeneratedColumn<bool> syncExcluded = GeneratedColumn<bool>(
+    'sync_excluded',
+    aliasedName,
+    true,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("sync_excluded" IN (0, 1))',
+    ),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -860,6 +1168,17 @@ class $IntakeEventsTable extends IntakeEvents
     source,
     status,
     updatedAtMs,
+    capacityMl,
+    levelBeforePct,
+    levelAfterPct,
+    timeEstimated,
+    sawDrinking,
+    tooLong,
+    fwSeq,
+    fwKey,
+    syncedAtMs,
+    syncError,
+    syncExcluded,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -956,6 +1275,90 @@ class $IntakeEventsTable extends IntakeEvents
     } else if (isInserting) {
       context.missing(_updatedAtMsMeta);
     }
+    if (data.containsKey('capacity_ml')) {
+      context.handle(
+        _capacityMlMeta,
+        capacityMl.isAcceptableOrUnknown(data['capacity_ml']!, _capacityMlMeta),
+      );
+    }
+    if (data.containsKey('level_before_pct')) {
+      context.handle(
+        _levelBeforePctMeta,
+        levelBeforePct.isAcceptableOrUnknown(
+          data['level_before_pct']!,
+          _levelBeforePctMeta,
+        ),
+      );
+    }
+    if (data.containsKey('level_after_pct')) {
+      context.handle(
+        _levelAfterPctMeta,
+        levelAfterPct.isAcceptableOrUnknown(
+          data['level_after_pct']!,
+          _levelAfterPctMeta,
+        ),
+      );
+    }
+    if (data.containsKey('time_estimated')) {
+      context.handle(
+        _timeEstimatedMeta,
+        timeEstimated.isAcceptableOrUnknown(
+          data['time_estimated']!,
+          _timeEstimatedMeta,
+        ),
+      );
+    }
+    if (data.containsKey('saw_drinking')) {
+      context.handle(
+        _sawDrinkingMeta,
+        sawDrinking.isAcceptableOrUnknown(
+          data['saw_drinking']!,
+          _sawDrinkingMeta,
+        ),
+      );
+    }
+    if (data.containsKey('too_long')) {
+      context.handle(
+        _tooLongMeta,
+        tooLong.isAcceptableOrUnknown(data['too_long']!, _tooLongMeta),
+      );
+    }
+    if (data.containsKey('fw_seq')) {
+      context.handle(
+        _fwSeqMeta,
+        fwSeq.isAcceptableOrUnknown(data['fw_seq']!, _fwSeqMeta),
+      );
+    }
+    if (data.containsKey('fw_key')) {
+      context.handle(
+        _fwKeyMeta,
+        fwKey.isAcceptableOrUnknown(data['fw_key']!, _fwKeyMeta),
+      );
+    }
+    if (data.containsKey('synced_at_ms')) {
+      context.handle(
+        _syncedAtMsMeta,
+        syncedAtMs.isAcceptableOrUnknown(
+          data['synced_at_ms']!,
+          _syncedAtMsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('sync_error')) {
+      context.handle(
+        _syncErrorMeta,
+        syncError.isAcceptableOrUnknown(data['sync_error']!, _syncErrorMeta),
+      );
+    }
+    if (data.containsKey('sync_excluded')) {
+      context.handle(
+        _syncExcludedMeta,
+        syncExcluded.isAcceptableOrUnknown(
+          data['sync_excluded']!,
+          _syncExcludedMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -1031,6 +1434,50 @@ class $IntakeEventsTable extends IntakeEvents
         DriftSqlType.int,
         data['${effectivePrefix}updated_at_ms'],
       )!,
+      capacityMl: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}capacity_ml'],
+      ),
+      levelBeforePct: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}level_before_pct'],
+      ),
+      levelAfterPct: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}level_after_pct'],
+      ),
+      timeEstimated: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}time_estimated'],
+      ),
+      sawDrinking: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}saw_drinking'],
+      ),
+      tooLong: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}too_long'],
+      ),
+      fwSeq: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}fw_seq'],
+      ),
+      fwKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}fw_key'],
+      ),
+      syncedAtMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}synced_at_ms'],
+      ),
+      syncError: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_error'],
+      ),
+      syncExcluded: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}sync_excluded'],
+      ),
     );
   }
 
@@ -1048,7 +1495,7 @@ class $IntakeEventsTable extends IntakeEvents
 }
 
 class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
-  /// UUID v4,日後同步雲端不會撞號。
+  /// UUID v4;上傳照護系統時就是 `client_event_id`。
   final String id;
   final String drinkerId;
 
@@ -1074,6 +1521,39 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
   final IntakeSource source;
   final IntakeStatus status;
   final int updatedAtMs;
+
+  /// 事件當下的水杯容量(mL),換算 mL 用的那個值。
+  final int? capacityMl;
+
+  /// 事件前/後的水位(%,0–100)。韌體事件是韌體送來的 A/B。
+  final double? levelBeforePct;
+  final double? levelAfterPct;
+
+  /// 時間為估計:韌體送來的事件沒有可信的時間(`time_unknown`),
+  /// [startedAtMs] 是 App 收到的時間。null 視為 false。
+  final bool? timeEstimated;
+
+  /// 韌體旗標:過程中出現過「飲用中」姿態、過程超過 10 分鐘。非韌體事件為 null。
+  final bool? sawDrinking;
+  final bool? tooLong;
+
+  /// 韌體事件的 seq(0..2047)。
+  final int? fwSeq;
+
+  /// 韌體事件的去重鍵(seq + 時間戳 + A/B),同一筆重送時相同。
+  final String? fwKey;
+
+  /// 上傳照護系統成功的時間(UTC 毫秒);null = 還沒同步(新增或修改過)。
+  final int? syncedAtMs;
+
+  /// 照護系統拒收這一版紀錄的原因(例如 INVALID_EVENT);有值 = 不再重送,
+  /// 直到紀錄再被修改。
+  final String? syncError;
+
+  /// true = 這筆紀錄不上傳照護系統,之後再修改也一樣。連結到新的住民時,本機原有的
+  /// 紀錄都會標上(Server 會把收到的事件算在 token 所屬的住民身上,連結之前的紀錄
+  /// 不能算到他頭上);從備份檔匯入的紀錄也是。
+  final bool? syncExcluded;
   const IntakeEvent({
     required this.id,
     required this.drinkerId,
@@ -1089,6 +1569,17 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
     required this.source,
     required this.status,
     required this.updatedAtMs,
+    this.capacityMl,
+    this.levelBeforePct,
+    this.levelAfterPct,
+    this.timeEstimated,
+    this.sawDrinking,
+    this.tooLong,
+    this.fwSeq,
+    this.fwKey,
+    this.syncedAtMs,
+    this.syncError,
+    this.syncExcluded,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1127,6 +1618,39 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
       );
     }
     map['updated_at_ms'] = Variable<int>(updatedAtMs);
+    if (!nullToAbsent || capacityMl != null) {
+      map['capacity_ml'] = Variable<int>(capacityMl);
+    }
+    if (!nullToAbsent || levelBeforePct != null) {
+      map['level_before_pct'] = Variable<double>(levelBeforePct);
+    }
+    if (!nullToAbsent || levelAfterPct != null) {
+      map['level_after_pct'] = Variable<double>(levelAfterPct);
+    }
+    if (!nullToAbsent || timeEstimated != null) {
+      map['time_estimated'] = Variable<bool>(timeEstimated);
+    }
+    if (!nullToAbsent || sawDrinking != null) {
+      map['saw_drinking'] = Variable<bool>(sawDrinking);
+    }
+    if (!nullToAbsent || tooLong != null) {
+      map['too_long'] = Variable<bool>(tooLong);
+    }
+    if (!nullToAbsent || fwSeq != null) {
+      map['fw_seq'] = Variable<int>(fwSeq);
+    }
+    if (!nullToAbsent || fwKey != null) {
+      map['fw_key'] = Variable<String>(fwKey);
+    }
+    if (!nullToAbsent || syncedAtMs != null) {
+      map['synced_at_ms'] = Variable<int>(syncedAtMs);
+    }
+    if (!nullToAbsent || syncError != null) {
+      map['sync_error'] = Variable<String>(syncError);
+    }
+    if (!nullToAbsent || syncExcluded != null) {
+      map['sync_excluded'] = Variable<bool>(syncExcluded);
+    }
     return map;
   }
 
@@ -1154,6 +1678,39 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
       source: Value(source),
       status: Value(status),
       updatedAtMs: Value(updatedAtMs),
+      capacityMl: capacityMl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(capacityMl),
+      levelBeforePct: levelBeforePct == null && nullToAbsent
+          ? const Value.absent()
+          : Value(levelBeforePct),
+      levelAfterPct: levelAfterPct == null && nullToAbsent
+          ? const Value.absent()
+          : Value(levelAfterPct),
+      timeEstimated: timeEstimated == null && nullToAbsent
+          ? const Value.absent()
+          : Value(timeEstimated),
+      sawDrinking: sawDrinking == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sawDrinking),
+      tooLong: tooLong == null && nullToAbsent
+          ? const Value.absent()
+          : Value(tooLong),
+      fwSeq: fwSeq == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fwSeq),
+      fwKey: fwKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fwKey),
+      syncedAtMs: syncedAtMs == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncedAtMs),
+      syncError: syncError == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncError),
+      syncExcluded: syncExcluded == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncExcluded),
     );
   }
 
@@ -1183,6 +1740,17 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
         serializer.fromJson<String>(json['status']),
       ),
       updatedAtMs: serializer.fromJson<int>(json['updatedAtMs']),
+      capacityMl: serializer.fromJson<int?>(json['capacityMl']),
+      levelBeforePct: serializer.fromJson<double?>(json['levelBeforePct']),
+      levelAfterPct: serializer.fromJson<double?>(json['levelAfterPct']),
+      timeEstimated: serializer.fromJson<bool?>(json['timeEstimated']),
+      sawDrinking: serializer.fromJson<bool?>(json['sawDrinking']),
+      tooLong: serializer.fromJson<bool?>(json['tooLong']),
+      fwSeq: serializer.fromJson<int?>(json['fwSeq']),
+      fwKey: serializer.fromJson<String?>(json['fwKey']),
+      syncedAtMs: serializer.fromJson<int?>(json['syncedAtMs']),
+      syncError: serializer.fromJson<String?>(json['syncError']),
+      syncExcluded: serializer.fromJson<bool?>(json['syncExcluded']),
     );
   }
   @override
@@ -1209,6 +1777,17 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
         $IntakeEventsTable.$converterstatus.toJson(status),
       ),
       'updatedAtMs': serializer.toJson<int>(updatedAtMs),
+      'capacityMl': serializer.toJson<int?>(capacityMl),
+      'levelBeforePct': serializer.toJson<double?>(levelBeforePct),
+      'levelAfterPct': serializer.toJson<double?>(levelAfterPct),
+      'timeEstimated': serializer.toJson<bool?>(timeEstimated),
+      'sawDrinking': serializer.toJson<bool?>(sawDrinking),
+      'tooLong': serializer.toJson<bool?>(tooLong),
+      'fwSeq': serializer.toJson<int?>(fwSeq),
+      'fwKey': serializer.toJson<String?>(fwKey),
+      'syncedAtMs': serializer.toJson<int?>(syncedAtMs),
+      'syncError': serializer.toJson<String?>(syncError),
+      'syncExcluded': serializer.toJson<bool?>(syncExcluded),
     };
   }
 
@@ -1227,6 +1806,17 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
     IntakeSource? source,
     IntakeStatus? status,
     int? updatedAtMs,
+    Value<int?> capacityMl = const Value.absent(),
+    Value<double?> levelBeforePct = const Value.absent(),
+    Value<double?> levelAfterPct = const Value.absent(),
+    Value<bool?> timeEstimated = const Value.absent(),
+    Value<bool?> sawDrinking = const Value.absent(),
+    Value<bool?> tooLong = const Value.absent(),
+    Value<int?> fwSeq = const Value.absent(),
+    Value<String?> fwKey = const Value.absent(),
+    Value<int?> syncedAtMs = const Value.absent(),
+    Value<String?> syncError = const Value.absent(),
+    Value<bool?> syncExcluded = const Value.absent(),
   }) => IntakeEvent(
     id: id ?? this.id,
     drinkerId: drinkerId ?? this.drinkerId,
@@ -1242,6 +1832,23 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
     source: source ?? this.source,
     status: status ?? this.status,
     updatedAtMs: updatedAtMs ?? this.updatedAtMs,
+    capacityMl: capacityMl.present ? capacityMl.value : this.capacityMl,
+    levelBeforePct: levelBeforePct.present
+        ? levelBeforePct.value
+        : this.levelBeforePct,
+    levelAfterPct: levelAfterPct.present
+        ? levelAfterPct.value
+        : this.levelAfterPct,
+    timeEstimated: timeEstimated.present
+        ? timeEstimated.value
+        : this.timeEstimated,
+    sawDrinking: sawDrinking.present ? sawDrinking.value : this.sawDrinking,
+    tooLong: tooLong.present ? tooLong.value : this.tooLong,
+    fwSeq: fwSeq.present ? fwSeq.value : this.fwSeq,
+    fwKey: fwKey.present ? fwKey.value : this.fwKey,
+    syncedAtMs: syncedAtMs.present ? syncedAtMs.value : this.syncedAtMs,
+    syncError: syncError.present ? syncError.value : this.syncError,
+    syncExcluded: syncExcluded.present ? syncExcluded.value : this.syncExcluded,
   );
   IntakeEvent copyWithCompanion(IntakeEventsCompanion data) {
     return IntakeEvent(
@@ -1265,6 +1872,31 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
       updatedAtMs: data.updatedAtMs.present
           ? data.updatedAtMs.value
           : this.updatedAtMs,
+      capacityMl: data.capacityMl.present
+          ? data.capacityMl.value
+          : this.capacityMl,
+      levelBeforePct: data.levelBeforePct.present
+          ? data.levelBeforePct.value
+          : this.levelBeforePct,
+      levelAfterPct: data.levelAfterPct.present
+          ? data.levelAfterPct.value
+          : this.levelAfterPct,
+      timeEstimated: data.timeEstimated.present
+          ? data.timeEstimated.value
+          : this.timeEstimated,
+      sawDrinking: data.sawDrinking.present
+          ? data.sawDrinking.value
+          : this.sawDrinking,
+      tooLong: data.tooLong.present ? data.tooLong.value : this.tooLong,
+      fwSeq: data.fwSeq.present ? data.fwSeq.value : this.fwSeq,
+      fwKey: data.fwKey.present ? data.fwKey.value : this.fwKey,
+      syncedAtMs: data.syncedAtMs.present
+          ? data.syncedAtMs.value
+          : this.syncedAtMs,
+      syncError: data.syncError.present ? data.syncError.value : this.syncError,
+      syncExcluded: data.syncExcluded.present
+          ? data.syncExcluded.value
+          : this.syncExcluded,
     );
   }
 
@@ -1284,13 +1916,24 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
           ..write('afterMl: $afterMl, ')
           ..write('source: $source, ')
           ..write('status: $status, ')
-          ..write('updatedAtMs: $updatedAtMs')
+          ..write('updatedAtMs: $updatedAtMs, ')
+          ..write('capacityMl: $capacityMl, ')
+          ..write('levelBeforePct: $levelBeforePct, ')
+          ..write('levelAfterPct: $levelAfterPct, ')
+          ..write('timeEstimated: $timeEstimated, ')
+          ..write('sawDrinking: $sawDrinking, ')
+          ..write('tooLong: $tooLong, ')
+          ..write('fwSeq: $fwSeq, ')
+          ..write('fwKey: $fwKey, ')
+          ..write('syncedAtMs: $syncedAtMs, ')
+          ..write('syncError: $syncError, ')
+          ..write('syncExcluded: $syncExcluded')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     drinkerId,
     cupId,
@@ -1305,7 +1948,18 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
     source,
     status,
     updatedAtMs,
-  );
+    capacityMl,
+    levelBeforePct,
+    levelAfterPct,
+    timeEstimated,
+    sawDrinking,
+    tooLong,
+    fwSeq,
+    fwKey,
+    syncedAtMs,
+    syncError,
+    syncExcluded,
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1323,7 +1977,18 @@ class IntakeEvent extends DataClass implements Insertable<IntakeEvent> {
           other.afterMl == this.afterMl &&
           other.source == this.source &&
           other.status == this.status &&
-          other.updatedAtMs == this.updatedAtMs);
+          other.updatedAtMs == this.updatedAtMs &&
+          other.capacityMl == this.capacityMl &&
+          other.levelBeforePct == this.levelBeforePct &&
+          other.levelAfterPct == this.levelAfterPct &&
+          other.timeEstimated == this.timeEstimated &&
+          other.sawDrinking == this.sawDrinking &&
+          other.tooLong == this.tooLong &&
+          other.fwSeq == this.fwSeq &&
+          other.fwKey == this.fwKey &&
+          other.syncedAtMs == this.syncedAtMs &&
+          other.syncError == this.syncError &&
+          other.syncExcluded == this.syncExcluded);
 }
 
 class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
@@ -1341,6 +2006,17 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
   final Value<IntakeSource> source;
   final Value<IntakeStatus> status;
   final Value<int> updatedAtMs;
+  final Value<int?> capacityMl;
+  final Value<double?> levelBeforePct;
+  final Value<double?> levelAfterPct;
+  final Value<bool?> timeEstimated;
+  final Value<bool?> sawDrinking;
+  final Value<bool?> tooLong;
+  final Value<int?> fwSeq;
+  final Value<String?> fwKey;
+  final Value<int?> syncedAtMs;
+  final Value<String?> syncError;
+  final Value<bool?> syncExcluded;
   final Value<int> rowid;
   const IntakeEventsCompanion({
     this.id = const Value.absent(),
@@ -1357,6 +2033,17 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
     this.source = const Value.absent(),
     this.status = const Value.absent(),
     this.updatedAtMs = const Value.absent(),
+    this.capacityMl = const Value.absent(),
+    this.levelBeforePct = const Value.absent(),
+    this.levelAfterPct = const Value.absent(),
+    this.timeEstimated = const Value.absent(),
+    this.sawDrinking = const Value.absent(),
+    this.tooLong = const Value.absent(),
+    this.fwSeq = const Value.absent(),
+    this.fwKey = const Value.absent(),
+    this.syncedAtMs = const Value.absent(),
+    this.syncError = const Value.absent(),
+    this.syncExcluded = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   IntakeEventsCompanion.insert({
@@ -1374,6 +2061,17 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
     required IntakeSource source,
     this.status = const Value.absent(),
     required int updatedAtMs,
+    this.capacityMl = const Value.absent(),
+    this.levelBeforePct = const Value.absent(),
+    this.levelAfterPct = const Value.absent(),
+    this.timeEstimated = const Value.absent(),
+    this.sawDrinking = const Value.absent(),
+    this.tooLong = const Value.absent(),
+    this.fwSeq = const Value.absent(),
+    this.fwKey = const Value.absent(),
+    this.syncedAtMs = const Value.absent(),
+    this.syncError = const Value.absent(),
+    this.syncExcluded = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        drinkerId = Value(drinkerId),
@@ -1399,6 +2097,17 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
     Expression<String>? source,
     Expression<String>? status,
     Expression<int>? updatedAtMs,
+    Expression<int>? capacityMl,
+    Expression<double>? levelBeforePct,
+    Expression<double>? levelAfterPct,
+    Expression<bool>? timeEstimated,
+    Expression<bool>? sawDrinking,
+    Expression<bool>? tooLong,
+    Expression<int>? fwSeq,
+    Expression<String>? fwKey,
+    Expression<int>? syncedAtMs,
+    Expression<String>? syncError,
+    Expression<bool>? syncExcluded,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1416,6 +2125,17 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
       if (source != null) 'source': source,
       if (status != null) 'status': status,
       if (updatedAtMs != null) 'updated_at_ms': updatedAtMs,
+      if (capacityMl != null) 'capacity_ml': capacityMl,
+      if (levelBeforePct != null) 'level_before_pct': levelBeforePct,
+      if (levelAfterPct != null) 'level_after_pct': levelAfterPct,
+      if (timeEstimated != null) 'time_estimated': timeEstimated,
+      if (sawDrinking != null) 'saw_drinking': sawDrinking,
+      if (tooLong != null) 'too_long': tooLong,
+      if (fwSeq != null) 'fw_seq': fwSeq,
+      if (fwKey != null) 'fw_key': fwKey,
+      if (syncedAtMs != null) 'synced_at_ms': syncedAtMs,
+      if (syncError != null) 'sync_error': syncError,
+      if (syncExcluded != null) 'sync_excluded': syncExcluded,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1435,6 +2155,17 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
     Value<IntakeSource>? source,
     Value<IntakeStatus>? status,
     Value<int>? updatedAtMs,
+    Value<int?>? capacityMl,
+    Value<double?>? levelBeforePct,
+    Value<double?>? levelAfterPct,
+    Value<bool?>? timeEstimated,
+    Value<bool?>? sawDrinking,
+    Value<bool?>? tooLong,
+    Value<int?>? fwSeq,
+    Value<String?>? fwKey,
+    Value<int?>? syncedAtMs,
+    Value<String?>? syncError,
+    Value<bool?>? syncExcluded,
     Value<int>? rowid,
   }) {
     return IntakeEventsCompanion(
@@ -1452,6 +2183,17 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
       source: source ?? this.source,
       status: status ?? this.status,
       updatedAtMs: updatedAtMs ?? this.updatedAtMs,
+      capacityMl: capacityMl ?? this.capacityMl,
+      levelBeforePct: levelBeforePct ?? this.levelBeforePct,
+      levelAfterPct: levelAfterPct ?? this.levelAfterPct,
+      timeEstimated: timeEstimated ?? this.timeEstimated,
+      sawDrinking: sawDrinking ?? this.sawDrinking,
+      tooLong: tooLong ?? this.tooLong,
+      fwSeq: fwSeq ?? this.fwSeq,
+      fwKey: fwKey ?? this.fwKey,
+      syncedAtMs: syncedAtMs ?? this.syncedAtMs,
+      syncError: syncError ?? this.syncError,
+      syncExcluded: syncExcluded ?? this.syncExcluded,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1507,6 +2249,39 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
     if (updatedAtMs.present) {
       map['updated_at_ms'] = Variable<int>(updatedAtMs.value);
     }
+    if (capacityMl.present) {
+      map['capacity_ml'] = Variable<int>(capacityMl.value);
+    }
+    if (levelBeforePct.present) {
+      map['level_before_pct'] = Variable<double>(levelBeforePct.value);
+    }
+    if (levelAfterPct.present) {
+      map['level_after_pct'] = Variable<double>(levelAfterPct.value);
+    }
+    if (timeEstimated.present) {
+      map['time_estimated'] = Variable<bool>(timeEstimated.value);
+    }
+    if (sawDrinking.present) {
+      map['saw_drinking'] = Variable<bool>(sawDrinking.value);
+    }
+    if (tooLong.present) {
+      map['too_long'] = Variable<bool>(tooLong.value);
+    }
+    if (fwSeq.present) {
+      map['fw_seq'] = Variable<int>(fwSeq.value);
+    }
+    if (fwKey.present) {
+      map['fw_key'] = Variable<String>(fwKey.value);
+    }
+    if (syncedAtMs.present) {
+      map['synced_at_ms'] = Variable<int>(syncedAtMs.value);
+    }
+    if (syncError.present) {
+      map['sync_error'] = Variable<String>(syncError.value);
+    }
+    if (syncExcluded.present) {
+      map['sync_excluded'] = Variable<bool>(syncExcluded.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1530,6 +2305,17 @@ class IntakeEventsCompanion extends UpdateCompanion<IntakeEvent> {
           ..write('source: $source, ')
           ..write('status: $status, ')
           ..write('updatedAtMs: $updatedAtMs, ')
+          ..write('capacityMl: $capacityMl, ')
+          ..write('levelBeforePct: $levelBeforePct, ')
+          ..write('levelAfterPct: $levelAfterPct, ')
+          ..write('timeEstimated: $timeEstimated, ')
+          ..write('sawDrinking: $sawDrinking, ')
+          ..write('tooLong: $tooLong, ')
+          ..write('fwSeq: $fwSeq, ')
+          ..write('fwKey: $fwKey, ')
+          ..write('syncedAtMs: $syncedAtMs, ')
+          ..write('syncError: $syncError, ')
+          ..write('syncExcluded: $syncExcluded, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1550,6 +2336,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_intake_time',
     'CREATE INDEX idx_intake_time ON intake_events (drinker_id, started_at_ms)',
   );
+  late final Index idxIntakeFw = Index(
+    'idx_intake_fw',
+    'CREATE UNIQUE INDEX idx_intake_fw ON intake_events (cup_id, fw_key)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1560,6 +2350,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     intakeEvents,
     idxIntakeDay,
     idxIntakeTime,
+    idxIntakeFw,
   ];
 }
 
@@ -1569,6 +2360,7 @@ typedef $$CupsTableCreateCompanionBuilder = CupsCompanion Function({
   Value<int> capacityMl,
   required int createdAtMs,
   required int updatedAtMs,
+  Value<String?> bleAddress,
   Value<int> rowid,
 });
 typedef $$CupsTableUpdateCompanionBuilder = CupsCompanion Function({
@@ -1577,6 +2369,7 @@ typedef $$CupsTableUpdateCompanionBuilder = CupsCompanion Function({
   Value<int> capacityMl,
   Value<int> createdAtMs,
   Value<int> updatedAtMs,
+  Value<String?> bleAddress,
   Value<int> rowid,
 });
 
@@ -1610,6 +2403,11 @@ class $$CupsTableFilterComposer extends Composer<_$AppDatabase, $CupsTable> {
 
   ColumnFilters<int> get updatedAtMs => $composableBuilder(
     column: $table.updatedAtMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bleAddress => $composableBuilder(
+    column: $table.bleAddress,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -1646,6 +2444,11 @@ class $$CupsTableOrderingComposer extends Composer<_$AppDatabase, $CupsTable> {
     column: $table.updatedAtMs,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get bleAddress => $composableBuilder(
+    column: $table.bleAddress,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CupsTableAnnotationComposer
@@ -1675,6 +2478,11 @@ class $$CupsTableAnnotationComposer
 
   GeneratedColumn<int> get updatedAtMs => $composableBuilder(
     column: $table.updatedAtMs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get bleAddress => $composableBuilder(
+    column: $table.bleAddress,
     builder: (column) => column,
   );
 }
@@ -1712,6 +2520,7 @@ class $$CupsTableTableManager
                 Value<int> capacityMl = const Value.absent(),
                 Value<int> createdAtMs = const Value.absent(),
                 Value<int> updatedAtMs = const Value.absent(),
+                Value<String?> bleAddress = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CupsCompanion(
                 id: id,
@@ -1719,6 +2528,7 @@ class $$CupsTableTableManager
                 capacityMl: capacityMl,
                 createdAtMs: createdAtMs,
                 updatedAtMs: updatedAtMs,
+                bleAddress: bleAddress,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -1728,6 +2538,7 @@ class $$CupsTableTableManager
                 Value<int> capacityMl = const Value.absent(),
                 required int createdAtMs,
                 required int updatedAtMs,
+                Value<String?> bleAddress = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CupsCompanion.insert(
                 id: id,
@@ -1735,6 +2546,7 @@ class $$CupsTableTableManager
                 capacityMl: capacityMl,
                 createdAtMs: createdAtMs,
                 updatedAtMs: updatedAtMs,
+                bleAddress: bleAddress,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -1773,6 +2585,8 @@ typedef $$DrinkersTableCreateCompanionBuilder = DrinkersCompanion Function({
   required String name,
   Value<int> dailyGoalMl,
   required int updatedAtMs,
+  Value<bool> goalFromServer,
+  Value<int?> serverGoalMl,
   Value<int> rowid,
 });
 typedef $$DrinkersTableUpdateCompanionBuilder = DrinkersCompanion Function({
@@ -1780,6 +2594,8 @@ typedef $$DrinkersTableUpdateCompanionBuilder = DrinkersCompanion Function({
   Value<String> name,
   Value<int> dailyGoalMl,
   Value<int> updatedAtMs,
+  Value<bool> goalFromServer,
+  Value<int?> serverGoalMl,
   Value<int> rowid,
 });
 
@@ -1832,6 +2648,16 @@ class $$DrinkersTableFilterComposer
 
   ColumnFilters<int> get updatedAtMs => $composableBuilder(
     column: $table.updatedAtMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get goalFromServer => $composableBuilder(
+    column: $table.goalFromServer,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get serverGoalMl => $composableBuilder(
+    column: $table.serverGoalMl,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1889,6 +2715,16 @@ class $$DrinkersTableOrderingComposer
     column: $table.updatedAtMs,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get goalFromServer => $composableBuilder(
+    column: $table.goalFromServer,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get serverGoalMl => $composableBuilder(
+    column: $table.serverGoalMl,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$DrinkersTableAnnotationComposer
@@ -1913,6 +2749,16 @@ class $$DrinkersTableAnnotationComposer
 
   GeneratedColumn<int> get updatedAtMs => $composableBuilder(
     column: $table.updatedAtMs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get goalFromServer => $composableBuilder(
+    column: $table.goalFromServer,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get serverGoalMl => $composableBuilder(
+    column: $table.serverGoalMl,
     builder: (column) => column,
   );
 
@@ -1974,12 +2820,16 @@ class $$DrinkersTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<int> dailyGoalMl = const Value.absent(),
                 Value<int> updatedAtMs = const Value.absent(),
+                Value<bool> goalFromServer = const Value.absent(),
+                Value<int?> serverGoalMl = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DrinkersCompanion(
                 id: id,
                 name: name,
                 dailyGoalMl: dailyGoalMl,
                 updatedAtMs: updatedAtMs,
+                goalFromServer: goalFromServer,
+                serverGoalMl: serverGoalMl,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -1988,12 +2838,16 @@ class $$DrinkersTableTableManager
                 required String name,
                 Value<int> dailyGoalMl = const Value.absent(),
                 required int updatedAtMs,
+                Value<bool> goalFromServer = const Value.absent(),
+                Value<int?> serverGoalMl = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => DrinkersCompanion.insert(
                 id: id,
                 name: name,
                 dailyGoalMl: dailyGoalMl,
                 updatedAtMs: updatedAtMs,
+                goalFromServer: goalFromServer,
+                serverGoalMl: serverGoalMl,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -2068,6 +2922,17 @@ typedef $$IntakeEventsTableCreateCompanionBuilder =
       required IntakeSource source,
       Value<IntakeStatus> status,
       required int updatedAtMs,
+      Value<int?> capacityMl,
+      Value<double?> levelBeforePct,
+      Value<double?> levelAfterPct,
+      Value<bool?> timeEstimated,
+      Value<bool?> sawDrinking,
+      Value<bool?> tooLong,
+      Value<int?> fwSeq,
+      Value<String?> fwKey,
+      Value<int?> syncedAtMs,
+      Value<String?> syncError,
+      Value<bool?> syncExcluded,
       Value<int> rowid,
     });
 typedef $$IntakeEventsTableUpdateCompanionBuilder =
@@ -2086,6 +2951,17 @@ typedef $$IntakeEventsTableUpdateCompanionBuilder =
       Value<IntakeSource> source,
       Value<IntakeStatus> status,
       Value<int> updatedAtMs,
+      Value<int?> capacityMl,
+      Value<double?> levelBeforePct,
+      Value<double?> levelAfterPct,
+      Value<bool?> timeEstimated,
+      Value<bool?> sawDrinking,
+      Value<bool?> tooLong,
+      Value<int?> fwSeq,
+      Value<String?> fwKey,
+      Value<int?> syncedAtMs,
+      Value<String?> syncError,
+      Value<bool?> syncExcluded,
       Value<int> rowid,
     });
 
@@ -2188,6 +3064,61 @@ class $$IntakeEventsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get capacityMl => $composableBuilder(
+    column: $table.capacityMl,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get levelBeforePct => $composableBuilder(
+    column: $table.levelBeforePct,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get levelAfterPct => $composableBuilder(
+    column: $table.levelAfterPct,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get timeEstimated => $composableBuilder(
+    column: $table.timeEstimated,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get sawDrinking => $composableBuilder(
+    column: $table.sawDrinking,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get tooLong => $composableBuilder(
+    column: $table.tooLong,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get fwSeq => $composableBuilder(
+    column: $table.fwSeq,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fwKey => $composableBuilder(
+    column: $table.fwKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncedAtMs => $composableBuilder(
+    column: $table.syncedAtMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncError => $composableBuilder(
+    column: $table.syncError,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get syncExcluded => $composableBuilder(
+    column: $table.syncExcluded,
+    builder: (column) => ColumnFilters(column),
+  );
+
   $$DrinkersTableFilterComposer get drinkerId {
     final $$DrinkersTableFilterComposer composer = $composerBuilder(
       composer: this,
@@ -2286,6 +3217,61 @@ class $$IntakeEventsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get capacityMl => $composableBuilder(
+    column: $table.capacityMl,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get levelBeforePct => $composableBuilder(
+    column: $table.levelBeforePct,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get levelAfterPct => $composableBuilder(
+    column: $table.levelAfterPct,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get timeEstimated => $composableBuilder(
+    column: $table.timeEstimated,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get sawDrinking => $composableBuilder(
+    column: $table.sawDrinking,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get tooLong => $composableBuilder(
+    column: $table.tooLong,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get fwSeq => $composableBuilder(
+    column: $table.fwSeq,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fwKey => $composableBuilder(
+    column: $table.fwKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncedAtMs => $composableBuilder(
+    column: $table.syncedAtMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get syncError => $composableBuilder(
+    column: $table.syncError,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get syncExcluded => $composableBuilder(
+    column: $table.syncExcluded,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$DrinkersTableOrderingComposer get drinkerId {
     final $$DrinkersTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -2364,6 +3350,53 @@ class $$IntakeEventsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<int> get capacityMl => $composableBuilder(
+    column: $table.capacityMl,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get levelBeforePct => $composableBuilder(
+    column: $table.levelBeforePct,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get levelAfterPct => $composableBuilder(
+    column: $table.levelAfterPct,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get timeEstimated => $composableBuilder(
+    column: $table.timeEstimated,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get sawDrinking => $composableBuilder(
+    column: $table.sawDrinking,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get tooLong =>
+      $composableBuilder(column: $table.tooLong, builder: (column) => column);
+
+  GeneratedColumn<int> get fwSeq =>
+      $composableBuilder(column: $table.fwSeq, builder: (column) => column);
+
+  GeneratedColumn<String> get fwKey =>
+      $composableBuilder(column: $table.fwKey, builder: (column) => column);
+
+  GeneratedColumn<int> get syncedAtMs => $composableBuilder(
+    column: $table.syncedAtMs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get syncError =>
+      $composableBuilder(column: $table.syncError, builder: (column) => column);
+
+  GeneratedColumn<bool> get syncExcluded => $composableBuilder(
+    column: $table.syncExcluded,
+    builder: (column) => column,
+  );
+
   $$DrinkersTableAnnotationComposer get drinkerId {
     final $$DrinkersTableAnnotationComposer composer = $composerBuilder(
       composer: this,
@@ -2430,6 +3463,17 @@ class $$IntakeEventsTableTableManager
                 Value<IntakeSource> source = const Value.absent(),
                 Value<IntakeStatus> status = const Value.absent(),
                 Value<int> updatedAtMs = const Value.absent(),
+                Value<int?> capacityMl = const Value.absent(),
+                Value<double?> levelBeforePct = const Value.absent(),
+                Value<double?> levelAfterPct = const Value.absent(),
+                Value<bool?> timeEstimated = const Value.absent(),
+                Value<bool?> sawDrinking = const Value.absent(),
+                Value<bool?> tooLong = const Value.absent(),
+                Value<int?> fwSeq = const Value.absent(),
+                Value<String?> fwKey = const Value.absent(),
+                Value<int?> syncedAtMs = const Value.absent(),
+                Value<String?> syncError = const Value.absent(),
+                Value<bool?> syncExcluded = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => IntakeEventsCompanion(
                 id: id,
@@ -2446,6 +3490,17 @@ class $$IntakeEventsTableTableManager
                 source: source,
                 status: status,
                 updatedAtMs: updatedAtMs,
+                capacityMl: capacityMl,
+                levelBeforePct: levelBeforePct,
+                levelAfterPct: levelAfterPct,
+                timeEstimated: timeEstimated,
+                sawDrinking: sawDrinking,
+                tooLong: tooLong,
+                fwSeq: fwSeq,
+                fwKey: fwKey,
+                syncedAtMs: syncedAtMs,
+                syncError: syncError,
+                syncExcluded: syncExcluded,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2464,6 +3519,17 @@ class $$IntakeEventsTableTableManager
                 required IntakeSource source,
                 Value<IntakeStatus> status = const Value.absent(),
                 required int updatedAtMs,
+                Value<int?> capacityMl = const Value.absent(),
+                Value<double?> levelBeforePct = const Value.absent(),
+                Value<double?> levelAfterPct = const Value.absent(),
+                Value<bool?> timeEstimated = const Value.absent(),
+                Value<bool?> sawDrinking = const Value.absent(),
+                Value<bool?> tooLong = const Value.absent(),
+                Value<int?> fwSeq = const Value.absent(),
+                Value<String?> fwKey = const Value.absent(),
+                Value<int?> syncedAtMs = const Value.absent(),
+                Value<String?> syncError = const Value.absent(),
+                Value<bool?> syncExcluded = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => IntakeEventsCompanion.insert(
                 id: id,
@@ -2480,6 +3546,17 @@ class $$IntakeEventsTableTableManager
                 source: source,
                 status: status,
                 updatedAtMs: updatedAtMs,
+                capacityMl: capacityMl,
+                levelBeforePct: levelBeforePct,
+                levelAfterPct: levelAfterPct,
+                timeEstimated: timeEstimated,
+                sawDrinking: sawDrinking,
+                tooLong: tooLong,
+                fwSeq: fwSeq,
+                fwKey: fwKey,
+                syncedAtMs: syncedAtMs,
+                syncError: syncError,
+                syncExcluded: syncExcluded,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

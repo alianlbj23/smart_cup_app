@@ -330,6 +330,10 @@ class FlutterBluePlusService implements BleService {
   Future<void> writeAck() => _write(_ackChar, CupProtocol.encodeAck());
 
   @override
+  Future<void> writeDrinkEventAck(int seq) =>
+      _write(_ackChar, CupProtocol.encodeDrinkEventAck(seq));
+
+  @override
   Future<DeviceStatus> readDeviceStatus() async {
     final c = _requireReady(_statusChar);
     try {
