@@ -139,6 +139,19 @@ void main() {
     expect(e.afterMl, 330);
   });
 
+  test('同一次拿起有「飲用中」但水位淨增加 → refill,狀態 uncertain(可能喝了又裝水)', () {
+    final s = _Sim();
+    s.rest(100);
+    s.sip(); // 過程中有飲用中姿態
+    s.handle(); // 接著拿去裝水,中途沒有放下穩定
+    s.rest(330);
+
+    final e = s.events.single;
+    expect(e.kind, IntakeKind.refill);
+    expect(e.status, IntakeStatus.uncertain);
+    expect(e.ml, 230);
+  });
+
   test('水量減少但沒看到飲用中姿態 → drink,狀態 uncertain(可能倒掉)', () {
     final s = _Sim();
     s.rest(300);
