@@ -606,6 +606,27 @@ void main() {
     });
   });
 
+  group('住民資料跟著 Server', () {
+    appTest('App 一直開著:住民換床位後,下一次狀態回報就更新顯示', (t) async {
+      await startSync(t);
+      expect(care.link!.resident.label, '101-1');
+
+      server.residents[0] = {'id': 12, 'label': '305-2', 'name_masked': '王○明'};
+      await t.pump(const Duration(minutes: 5));
+      await sync.settled();
+      expect(care.link!.resident.label, '305-2');
+      expect((await store.loadLink())!.resident.label, '305-2');
+    });
+
+    appTest('舊版 Server 的狀態回報沒有 resident:住民資料不變', (t) async {
+      server.statusIncludesResident = false;
+      await startSync(t);
+      await t.pump(const Duration(minutes: 5));
+      await sync.settled();
+      expect(care.link!.resident.label, '101-1');
+    });
+  });
+
   group('每日目標以 Server 為準', () {
     appTest('狀態回報的回應帶新的目標 → 更新 drinkers.daily_goal_ml', (t) async {
       expect(repo.goalMl, 1500);

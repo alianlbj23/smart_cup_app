@@ -294,7 +294,9 @@ class CareSync extends ChangeNotifier {
     try {
       final reply =
           await _api.postStatus(Uri.parse(link.serverUrl), link.token, report);
-      await _link.applyServerInfo(link.token, goal: reply.goal);
+      // 回應裡的住民資料讓一直開著的 App 也跟得上換房、換床(舊版 Server 沒有就不動)。
+      await _link.applyServerInfo(link.token,
+          goal: reply.goal, resident: reply.resident);
     } on CareApiException catch (e) {
       await _onApiError(link, e, what: '回報狀態');
     }

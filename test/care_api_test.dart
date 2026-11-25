@@ -479,6 +479,53 @@ void main() {
       });
       expect(reply.goal.dailyGoalMl, 1800);
       expect(reply.goal.effectiveFrom, '2026-11-26');
+      expect(reply.resident, isNull); // 舊版 Server 不帶 resident:選填
+    });
+
+    test('cup/status/:回應帶住民目前的資料(換床位)', () async {
+      final reply = await api((_) => _ok({
+            'server_time': 1795600000,
+            'daily_goal_ml': 1500,
+            'goal_effective_from': '2026-11-25',
+            'resident': {'id': 12, 'label': '305-2', 'name_masked': '王○明'},
+          })).postStatus(
+        _base,
+        token,
+        const CareStatusReport(
+          cupConnected: false,
+          cupLastSeenAt: null,
+          batteryPct: null,
+          firmware: null,
+          pendingEvents: 0,
+          levelPct: null,
+        ),
+      );
+      expect(reply.resident!.id, 12);
+      expect(reply.resident!.label, '305-2');
+      expect(reply.resident!.nameMasked, '王○明');
+    });
+
+    test('cup/status/:resident 格式不對 → BAD_RESPONSE', () async {
+      await expectLater(
+        api((_) => _ok({
+              'server_time': 1795600000,
+              'daily_goal_ml': null,
+              'goal_effective_from': null,
+              'resident': {'id': 'x', 'label': 3},
+            })).postStatus(
+          _base,
+          token,
+          const CareStatusReport(
+            cupConnected: false,
+            cupLastSeenAt: null,
+            batteryPct: null,
+            firmware: null,
+            pendingEvents: 0,
+            levelPct: null,
+          ),
+        ),
+        throwsA(_apiError('BAD_RESPONSE')),
+      );
     });
 
     test('cup/status/:未知的值送 null;Server 回 null 目標', () async {

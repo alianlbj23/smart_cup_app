@@ -252,10 +252,18 @@ class CareStatusReport {
 
 /// `POST cup/status/` 的結果。
 class CareStatusReply {
-  const CareStatusReply({required this.goal, required this.serverTime});
+  const CareStatusReply({
+    required this.goal,
+    required this.serverTime,
+    this.resident,
+  });
 
   final CareGoal goal;
   final DateTime? serverTime;
+
+  /// Server 目前的住民資料(App 一直開著時靠它跟上換房、換床);舊版 Server
+  /// 沒有這個欄位時為 null。
+  final CareResident? resident;
 }
 
 /// `POST cup/events/` 每一筆的結果。
@@ -495,6 +503,9 @@ class CareApi {
       () => CareStatusReply(
         goal: CareGoal._fromData(data),
         serverTime: _serverTime(data['server_time']),
+        resident: data['resident'] == null
+            ? null
+            : CareResident.fromJson(data['resident']),
       ),
     );
   }

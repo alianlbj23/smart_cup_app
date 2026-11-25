@@ -51,6 +51,9 @@ class FakeCareServer {
   /// 成功收下的事件批次(每個請求一批)。
   final List<List<Map<String, dynamic>>> uploadedBatches = [];
 
+  /// `cup/status/` 的回應要不要帶 `resident`(舊版 Server 不帶)。
+  bool statusIncludesResident = true;
+
   /// 收到的 `cup/status/` 內容。
   final List<Map<String, dynamic>> statuses = [];
 
@@ -153,6 +156,8 @@ class FakeCareServer {
             'server_time': 1795600000,
             'daily_goal_ml': goalMl,
             'goal_effective_from': goalMl == null ? null : goalFrom,
+            // 住民目前的資料(換床位後 App 靠這個跟上);舊版 Server 沒有這個欄位。
+            if (statusIncludesResident) 'resident': _resident,
           }));
     }
     return http.Response('Not Found', 404);
