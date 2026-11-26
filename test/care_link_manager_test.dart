@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:stut_food_intake_project/app_info.dart';
 import 'package:stut_food_intake_project/data/intake_repository.dart';
 import 'package:stut_food_intake_project/services/ble_service.dart';
 import 'package:stut_food_intake_project/services/care_api.dart';
@@ -229,7 +230,7 @@ void main() {
           'cup_hardware_id': 'AA:BB',
           'cup_name': 'SmartCup-E0CE',
           'platform': 'android',
-          'app_version': '1.1.0',
+          'app_version': appVersion,
         });
         expect(care.pairing!.pairingCode, 'K7QM42XP');
         expect(care.pairing!.resident.display, '101-1 王○明');

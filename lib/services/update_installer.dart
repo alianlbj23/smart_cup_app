@@ -264,10 +264,19 @@ exec "./$exe"
       r"Add-Content -LiteralPath $env:SMART_CUP_UPDATE_LOG -Value ((Get-Date -Format o) + ' ' + $_); "
       r"exit 1 }";
 
+  // 透過 `cmd /c start` 啟動:Dart 的 detached 模式不給主控台(DETACHED_PROCESS),
+  // Windows PowerShell 在沒有主控台時不會執行 -Command 就直接結束。`start` 會給它
+  // 一個新的(最小化)主控台,而且不等它結束。指令內容沒有雙引號,Dart 會把含空白的
+  // 參數包進雙引號,所以 cmd 不會解讀裡面的 | 和括號。
   Future<void> _startWindowsHelper(Directory staging, File log) async {
     await Process.start(
-      '$_systemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      '$_systemRoot\\System32\\cmd.exe',
       [
+        '/c',
+        'start',
+        '',
+        '/min',
+        '$_systemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
         '-NoProfile',
         '-NonInteractive',
         '-WindowStyle',
