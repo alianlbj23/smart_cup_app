@@ -41,6 +41,9 @@ class _StatsPageState extends State<StatsPage> {
   /// 週/月檢視的每日總量。
   Map<DateTime, int>? _totals;
 
+  /// 目前範圍內,因為是連結照護系統之前的紀錄而沒有計入的筆數。
+  int _hiddenBeforeLink = 0;
+
   /// 目前資料對應的範圍與起日;和畫面選擇不同時表示正在載入新資料,
   /// 先以半透明保留舊畫面,避免閃爍。
   (StatsRange, DateTime)? _loadedFor;
@@ -85,11 +88,13 @@ class _StatsPageState extends State<StatsPage> {
     final gen = ++_generation;
     final range = _range;
     final p = _period;
+    final hidden = await widget.repo.hiddenBeforeLinkCount(p.from, p.to);
     if (range == StatsRange.day) {
       final events = await widget.repo.eventsOnDay(p.from);
       if (!mounted || gen != _generation) return;
       setState(() {
         _events = events;
+        _hiddenBeforeLink = hidden;
         _loadedFor = (range, p.from);
       });
     } else {
@@ -97,6 +102,7 @@ class _StatsPageState extends State<StatsPage> {
       if (!mounted || gen != _generation) return;
       setState(() {
         _totals = totals;
+        _hiddenBeforeLink = hidden;
         _loadedFor = (range, p.from);
       });
     }
@@ -246,6 +252,13 @@ class _StatsPageState extends State<StatsPage> {
         padding: EdgeInsets.fromLTRB(side, 16, side, 24),
         children: [
           _controls(),
+          // 已連結照護系統:數字要和照護系統一致,連結之前的紀錄不算。
+          if (_hiddenBeforeLink > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+              child: Text('連結照護系統之前的 $_hiddenBeforeLink 筆紀錄不計入',
+                  style: mutedSmall),
+            ),
           const SizedBox(height: 12),
           ..._content(),
         ],

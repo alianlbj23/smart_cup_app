@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 import '../../state/intake_stats.dart';
 import '../theme.dart';
 import 'chart_style.dart';
+import 'chart_zoom.dart';
 
 /// 週/月的每日長條圖,附每日目標參考線(灰色虛線)。
 ///
 /// 單一數列,所有長條同色;是否達標由參考線判讀,不另外換色。
-/// 未來的日子不畫長條。週顯示星期,月每 5 天標一次日期。
+/// 未來的日子不畫長條。週顯示星期,月每 5 天標一次日期(放大後每天都標)。
+/// 可以沿時間軸放大、移動(見 [ChartZoom]);換一週、換一個月就還原。
 class PeriodBarChart extends StatelessWidget {
   const PeriodBarChart({super.key, required this.stats, required this.isMonth});
 
@@ -28,7 +30,10 @@ class PeriodBarChart extends StatelessWidget {
       // 長條最寬 24,其餘留白;月檢視在手機上約 5–6 px。
       final barWidth = math.min(24.0, math.max(2.0, slot * 0.6));
       final radius = Radius.circular(math.min(4.0, barWidth / 2));
-      return SizedBox(
+      return ChartZoom(
+        key: ValueKey((s.days.first.day, isMonth)),
+        maxScale: isMonth ? 6 : 3,
+        builder: (context, zoom, scale) => SizedBox(
         height: 200,
         child: BarChart(
           BarChartData(
@@ -90,7 +95,7 @@ class PeriodBarChart extends StatelessWidget {
                     final d = s.days[i].day;
                     final String label;
                     if (isMonth) {
-                      if (d.day != 1 && d.day % 5 != 0) {
+                      if (scale < 3 && d.day != 1 && d.day % 5 != 0) {
                         return const SizedBox.shrink();
                       }
                       label = '${d.day}';
@@ -136,7 +141,9 @@ class PeriodBarChart extends StatelessWidget {
               ),
             ),
           ),
+          transformationConfig: zoom,
           duration: Duration.zero,
+        ),
         ),
       );
     });

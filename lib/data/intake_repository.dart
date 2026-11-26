@@ -78,6 +78,19 @@ class IntakeRepository extends ChangeNotifier {
   /// 已連結照護系統:每日目標以 Server 為準,不能在 App 修改。
   bool get goalFromServer => _drinker?.goalFromServer ?? false;
 
+  /// 是否已連結照護系統。連結期間目標一律以 Server 為準,所以和 [goalFromServer]
+  /// 是同一件事(連結時 applyServerGoal、解除連結時 clearServerGoal)。
+  bool get linkedToCare => goalFromServer;
+
+  /// 統計與紀錄列表要算哪些紀錄。
+  ///
+  /// 已連結照護系統時,略過「連結之前就在這台裝置上」的紀錄(`syncExcluded`):
+  /// 它們不會上傳,算進來的話 App 的數字會和照護系統對不上。紀錄本身沒有刪掉
+  /// (備份、CSV 都還有),解除連結後會再算回來。
+  Expression<bool> _countedInStats($IntakeEventsTable e) => linkedToCare
+      ? e.syncExcluded.isNull() | e.syncExcluded.equals(false)
+      : const Constant(true);
+
   /// 目前有效的每日目標(mL)。已連結照護系統而照護系統還沒設定目標時為 null:
   /// 畫面要顯示「照護系統尚未設定目標」,不可以套用任何預設值。
   int? get goalMl => goalFromServer ? _drinker?.serverGoalMl : dailyGoalMl;
@@ -360,6 +373,7 @@ class IntakeRepository extends ChangeNotifier {
     final q = _db.select(_db.intakeEvents)
       ..where((e) =>
           e.drinkerId.equals(defaultDrinkerId) &
+          _countedInStats(e) &
           e.localDay.isBetweenValues(dayKey(fromDay), dayKey(toDay)))
       ..orderBy([(e) => OrderingTerm.asc(e.startedAtMs)]);
     if (!includeDeleted) {
@@ -380,6 +394,7 @@ class IntakeRepository extends ChangeNotifier {
           ..where(_db.intakeEvents.drinkerId.equals(defaultDrinkerId) &
               _db.intakeEvents.kind.equalsValue(IntakeKind.drink) &
               _db.intakeEvents.status.equalsValue(IntakeStatus.ok) &
+              _countedInStats(_db.intakeEvents) &
               _db.intakeEvents.localDay
                   .isBetweenValues(dayKey(fromDay), dayKey(toDay)))
           ..groupBy([_db.intakeEvents.localDay]))
@@ -395,6 +410,22 @@ class IntakeRepository extends ChangeNotifier {
       result[d] = byKey[dayKey(d)] ?? 0;
     }
     return result;
+  }
+
+  /// [fromDay] 到 [toDay] 之間,因為是連結照護系統之前的紀錄而沒有計入統計的筆數
+  /// (不含已刪除)。還沒連結時為 0。
+  Future<int> hiddenBeforeLinkCount(DateTime fromDay, DateTime toDay) async {
+    if (!linkedToCare) return 0;
+    final e = _db.intakeEvents;
+    final count = e.id.count();
+    final row = await (_db.selectOnly(e)
+          ..addColumns([count])
+          ..where(e.drinkerId.equals(defaultDrinkerId) &
+              e.syncExcluded.equals(true) &
+              e.status.equalsValue(IntakeStatus.deleted).not() &
+              e.localDay.isBetweenValues(dayKey(fromDay), dayKey(toDay))))
+        .getSingle();
+    return row.read(count) ?? 0;
   }
 
   // ---------------------------------------------------------------- 同步

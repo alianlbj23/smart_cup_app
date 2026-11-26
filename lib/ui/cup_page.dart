@@ -6,6 +6,7 @@ import 'cup_attitude.dart';
 import 'cup_link.dart';
 import 'cup_reading.dart';
 import 'doze_banner.dart';
+import 'searching_indicator.dart';
 import 'theme.dart';
 
 /// 水杯裝置:目前連線、水量與姿態。App 一次連線一個水杯。
@@ -70,6 +71,10 @@ class CupPage extends StatelessWidget {
         m.state == CupConnectionState.connected ||
         m.state == CupConnectionState.serviceDiscovered;
     final remembered = m.rememberedDevice;
+    // 找不到水杯但馬上會自動再找:對使用者來說仍然是「正在尋找」
+    final retrying =
+        m.state == CupConnectionState.notFound && m.autoRetryPending;
+    final searching = busy || retrying;
     final cupId = m.activeDeviceId ?? remembered?.id;
     final cupName =
         m.activeDeviceId != null ? m.connectingName : remembered?.name;
@@ -80,11 +85,14 @@ class CupPage extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
-                ready ? Icons.bluetooth_connected : Icons.bluetooth,
-                color: ready ? AppColors.teal : AppColors.muted,
-                size: 28,
-              ),
+              if (searching)
+                const SearchingIndicator(size: 28)
+              else
+                Icon(
+                  ready ? Icons.bluetooth_connected : Icons.bluetooth,
+                  color: ready ? AppColors.teal : AppColors.muted,
+                  size: 28,
+                ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -117,6 +125,19 @@ class CupPage extends StatelessWidget {
                       Text(msg,
                           style: const TextStyle(
                               fontSize: 12, color: AppColors.red)),
+                    // 尋找、連線中:一條會動的進度條,讓使用者知道 App 正在找
+                    if (searching) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        retrying ? '持續尋找中,找到會自動連上' : '正在尋找水杯…',
+                        style: mutedSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      const ClipRRect(
+                        borderRadius: BorderRadius.all(Radius.circular(2)),
+                        child: LinearProgressIndicator(minHeight: 3),
+                      ),
+                    ],
                   ],
                 ),
               ),
