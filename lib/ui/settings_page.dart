@@ -7,7 +7,9 @@ import '../data/intake_repository.dart';
 import '../services/backup_service.dart';
 import '../state/care_link_manager.dart';
 import '../state/care_sync.dart';
+import '../state/disconnect_log.dart';
 import 'care_link_panel.dart';
+import 'disconnect_log_panel.dart';
 import 'theme.dart';
 
 /// 設定:每日目標、水杯容量、照護系統(連結/解除)、資料備份(匯出/匯入)。
@@ -21,9 +23,13 @@ class SettingsPage extends StatefulWidget {
     this.clock,
     this.care,
     this.careSync,
+    this.disconnectLog,
   });
 
   final IntakeRepository repo;
+
+  /// 水杯的斷線紀錄;有傳入才顯示「連線紀錄」區塊。
+  final DisconnectLog? disconnectLog;
 
   /// 照護系統的連結狀態;有傳入才顯示「照護系統」區塊。
   final CareLinkManager? care;
@@ -113,6 +119,10 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 12),
         ],
         _backupPanel(),
+        if (widget.disconnectLog != null) ...[
+          const SizedBox(height: 12),
+          DisconnectLogPanel(log: widget.disconnectLog!),
+        ],
       ],
     );
   }

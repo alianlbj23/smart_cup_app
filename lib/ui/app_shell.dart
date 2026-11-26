@@ -6,6 +6,7 @@ import '../data/intake_repository.dart';
 import '../state/care_link_manager.dart';
 import '../state/care_sync.dart';
 import '../state/cup_connection_manager.dart';
+import '../state/disconnect_log.dart';
 import 'cup_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
@@ -18,9 +19,13 @@ class AppShell extends StatefulWidget {
     required this.repo,
     this.care,
     this.careSync,
+    this.disconnectLog,
   });
 
   final CupConnectionManager manager;
+
+  /// 水杯的斷線紀錄(設定頁「連線紀錄」)。
+  final DisconnectLog? disconnectLog;
   final IntakeRepository repo;
 
   /// 照護系統的連結與背景同步;有傳入時「設定」頁才有「照護系統」區塊。
@@ -65,6 +70,7 @@ class _AppShellState extends State<AppShell> {
             repo: widget.repo,
             care: widget.care,
             careSync: widget.careSync,
+            disconnectLog: widget.disconnectLog,
           ),
     ];
     return Scaffold(

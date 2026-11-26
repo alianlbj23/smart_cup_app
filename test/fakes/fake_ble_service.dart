@@ -138,9 +138,13 @@ class FakeBleService implements BleService {
   /// 模擬裝置推送 Device Status Notify。
   void pushStatus(DeviceStatus status) => _statusCtrl.add(status);
 
-  /// 模擬意外斷線。
-  void dropLink() {
+  @override
+  BleDisconnectReason? lastDisconnectReason;
+
+  /// 模擬意外斷線;[reason] 是平台回報的斷線原因(例如 Android 的 GATT 8 = 連線逾時)。
+  void dropLink({BleDisconnectReason? reason}) {
     connectedId = null;
+    lastDisconnectReason = reason;
     _stateCtrl.add(BleConnectionState.disconnected);
   }
 

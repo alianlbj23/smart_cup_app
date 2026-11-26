@@ -46,6 +46,7 @@ dependencies:
   intl: ^0.20.3
   # 照護系統 HTTPS 連線(固定版本)。
   http: 1.6.0
+  flutter_foreground_task: 11.0.3
 
 dev_dependencies:
   flutter_test:

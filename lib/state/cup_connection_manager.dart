@@ -27,6 +27,27 @@ enum CupFlow {
   reconnect,
 }
 
+/// 一次意外斷線(使用者按「斷線」不算)。
+class CupDisconnect {
+  const CupDisconnect({
+    required this.at,
+    required this.deviceId,
+    required this.deviceName,
+    required this.reason,
+    required this.wasDozing,
+  });
+
+  final DateTime at;
+  final String deviceId;
+  final String? deviceName;
+
+  /// 平台回報的原因;沒提供時為 null。
+  final BleDisconnectReason? reason;
+
+  /// 斷線當下水杯是否在休眠。
+  final bool wasDozing;
+}
+
 class ReceivedPacket {
   const ReceivedPacket(this.packet, this.receivedAt, {required this.acked});
 
@@ -113,6 +134,10 @@ class CupConnectionManager extends ChangeNotifier {
   bool _disposed = false;
 
   final _packets = StreamController<CupDataPacket>.broadcast();
+  final _disconnects = StreamController<CupDisconnect>.broadcast();
+
+  /// 每次意外斷線(含初始化期間斷線)送出一筆;dispose 時關閉。
+  Stream<CupDisconnect> get unexpectedDisconnects => _disconnects.stream;
 
   CupConnectionState get state => _state;
   CupFlow get flow => _flow;
@@ -397,6 +422,14 @@ class CupConnectionManager extends ChangeNotifier {
 
     // 意外斷線(主動斷線會先清除 _linkUp,不會走到這裡)。
     final deviceId = _deviceId!;
+    final now = DateTime.now();
+    _disconnects.add(CupDisconnect(
+      at: now,
+      deviceId: deviceId,
+      deviceName: _deviceName,
+      reason: _ble.lastDisconnectReason,
+      wasDozing: isDozing(now),
+    ));
     if (_state != CupConnectionState.ready) {
       // 尚未 Ready 就斷線,視同連線失敗,計入重試次數。
       unawaited(_onConnectFailed(deviceId, '裝置在初始化期間斷線'));
@@ -618,6 +651,7 @@ class CupConnectionManager extends ChangeNotifier {
       s.cancel();
     }
     unawaited(_packets.close());
+    unawaited(_disconnects.close());
     unawaited(_safeDisconnect());
     super.dispose();
   }

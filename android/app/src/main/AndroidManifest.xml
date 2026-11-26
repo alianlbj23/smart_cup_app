@@ -14,6 +14,11 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <!-- 前景服務:螢幕關掉、切到別的 App 時維持水杯的藍牙連線(flutter_foreground_task) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
         android:label="智慧水杯"
         android:name="${applicationName}"
@@ -40,6 +45,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 前景服務(名稱不能改)。connectedDevice:和藍牙裝置連線;滑掉 App 就停 -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="connectedDevice"
+            android:stopWithTask="true"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
