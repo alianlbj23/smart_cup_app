@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App 自動更新:只開放快取資料夾底下的 smart_cup_update/ 給系統的安裝程式讀取
+     (和 MainActivity.kt 的 UPDATE_DIR、Dart 端的 downloadDirName 一致)。 -->
+<paths>
+    <cache-path name="updates" path="smart_cup_update/" />
+</paths>

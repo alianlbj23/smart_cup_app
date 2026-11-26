@@ -48,6 +48,11 @@ class FlutterBluePlusService implements BleService {
   @override
   Stream<BleConnectionState> get connectionState => _stateCtrl.stream;
 
+  BleDisconnectReason? _lastDisconnectReason;
+
+  @override
+  BleDisconnectReason? get lastDisconnectReason => _lastDisconnectReason;
+
   @override
   Stream<List<BleDeviceInfo>> get scanResults => _scanCtrl.stream;
 
@@ -199,6 +204,12 @@ class FlutterBluePlusService implements BleService {
       if (s == BluetoothConnectionState.disconnected && _linkUp) {
         _linkUp = false;
         _clearChars();
+        final reason = device.disconnectReason;
+        _lastDisconnectReason = reason == null
+            ? null
+            : BleDisconnectReason(
+                code: reason.code, description: reason.description);
+        debugPrint('[BLE] 斷線:${reason?.code} ${reason?.description}');
         _emit(BleConnectionState.disconnected);
       }
     });

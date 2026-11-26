@@ -1,11 +1,12 @@
 # smart_cup_app（智慧水杯）
 
-透過 BLE 連線 ESP32-C6 智慧水杯，顯示水量、姿態、飲水紀錄與統計的 Flutter App（版本 1.1.0）；可以連結照護系統，把飲水紀錄傳給照護人員。
+透過 BLE 連線 ESP32-C6 智慧水杯，顯示水量、姿態、飲水紀錄與統計的 Flutter App（版本 1.1.1）；可以連結照護系統，把飲水紀錄傳給照護人員。
 
 - BLE：`flutter_blue_plus`（只在 [lib/services/flutter_blue_plus_service.dart](lib/services/flutter_blue_plus_service.dart) 使用）
 - 本地儲存：飲水紀錄用 SQLite（`drift`，見[飲水紀錄與統計](#飲水紀錄與統計)）；記住的水杯用 `shared_preferences`
 - 圖表：`fl_chart`
 - 照護系統（Server）：HTTPS／JSON，`http`（只在 [lib/services/care_api.dart](lib/services/care_api.dart) 使用），見[連結照護系統](#連結照護系統)；三邊的介面寫在 food_intake 專案的 `docs/smart-cup/CONTRACT.md`
+- 自動更新：App 會向這個 repo 的 [GitHub Releases](https://github.com/alianlbj23/smart_cup_app/releases) 查詢新版，見[發佈與自動更新](#發佈與自動更新)
 - 水杯韌體：[smart_cup_firmware](https://github.com/alianlbj23/smart_cup_firmware)（另一個 repo，見下方[水杯韌體](#水杯韌體)）
 
 ## 水杯韌體
@@ -249,7 +250,8 @@ flutter build appbundle --release   # 上架 Google Play 用的 AAB
 
 - 藍牙權限（`BLUETOOTH_SCAN`、`BLUETOOTH_CONNECT`，以及 Android 11 以下需要的 `ACCESS_FINE_LOCATION`）與連結照護系統用的 `INTERNET` 權限已經寫在 [AndroidManifest.xml](android/app/src/main/AndroidManifest.xml)。
 - Android 預設不允許 http（明文）連線，照護系統的伺服器位址要用 https。
-- 目前 release 版本用 **debug key 簽章**（[android/app/build.gradle.kts](android/app/build.gradle.kts) 的 `signingConfig`），只適合內部測試。要上架的話，請先設定正式的 keystore，keystore 和密碼不要 commit。
+- 簽章（[android/app/build.gradle.kts](android/app/build.gradle.kts) 的 `signingConfig`）：有 `android/key.properties` 時用裡面指定的正式 keystore；沒有時退回 **debug key**，只適合自己測試（debug key 每台機器不同，裝不上別台機器編出來的版本）。用 `bash tool/android_keystore.sh` 建立 keystore，見[發佈與自動更新](#發佈與自動更新)。keystore 和 `key.properties` 已被 [android/.gitignore](android/.gitignore) 排除，不要 commit。
+- 自動更新需要 `REQUEST_INSTALL_PACKAGES` 權限與一個 `FileProvider`（只開放快取資料夾裡的 `smart_cup_update/`），都已經寫在 [AndroidManifest.xml](android/app/src/main/AndroidManifest.xml)。
 - `applicationId` 目前是 `com.example.stut_food_intake_project`，上架前要改掉。
 
 ### iOS（只能在 macOS 上編譯）
@@ -317,6 +319,49 @@ flutter build web --release
 - 瀏覽器規定掃描（選擇裝置）一定要由使用者點擊觸發，所以 App 啟動時無法自動重連記憶的水杯，每次都要重新選擇。
 - 本機預覽：`flutter run -d chrome`。
 
+## 發佈與自動更新
+
+### 發佈（GitHub Actions）
+
+[.github/workflows/build-release.yml](.github/workflows/build-release.yml) 在每次推到 `main` 時：
+
+1. 跑 `flutter analyze` 和 `flutter test`。
+2. 編譯 Linux、Windows、macOS、Android、iOS 五個平台（PR 也會編譯，但不發佈）。
+3. 讀 `pubspec.yaml` 的 `version`。**還沒有對應的 tag（例如 `v1.2.0`）時**，自動建立 tag 和 GitHub Release，附上下表的檔案和 `SHA256SUMS.txt`；release 的說明是上一版之後的 commit 標題。tag 已經存在就只編譯、不發佈。
+
+**要發新版**：把 `pubspec.yaml` 的 `version`、[lib/app_info.dart](lib/app_info.dart) 的 `appVersion`、[test/app_info_test.dart](test/app_info_test.dart) 裡的版本一起調高，推到 `main`。不用自己打 tag。
+
+| 平台 | Release 裡的檔案 | 怎麼安裝 |
+| --- | --- | --- |
+| Android | `smart_cup_app-android.apk` | 直接安裝（第一次要允許安裝未知來源的應用程式） |
+| Windows | `smart_cup_app-windows-x64.zip` | 解壓縮到自己有寫入權限的資料夾（不要放 `Program Files`），執行裡面的 exe |
+| Linux | `smart_cup_app-linux-x64.tar.gz` | 解壓縮到自己有寫入權限的資料夾，執行 `stut_food_intake_project` |
+| macOS | `smart_cup_app-macos.zip` | 解壓縮後把 App 拖到「應用程式」。**沒有簽章**，第一次要在「系統設定 → 隱私權與安全性」按「仍要打開」 |
+| iOS | `smart_cup_app-ios-unsigned.ipa` | **沒有簽章**，不能直接安裝；要用自己的 Apple 帳號重新簽章（sideload）或改走 TestFlight |
+
+檔名是 App 自動更新認的名字（`UpdatePlatform.assetName`），改檔名要兩邊一起改。
+
+- 測試沒過就不發佈。某個平台編譯失敗時，其餘平台照樣發佈，那次執行會顯示失敗；修好設定後在 Actions 對同一次執行按「Re-run failed jobs」，缺的檔案會補進同一個 release。如果要改程式碼才修得好，就要再調高版本號。
+- **Android 簽章**：發佈時一定要有四個 secrets（`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`），沒有的話 Android 的工作會失敗、release 裡不會有 APK。執行 `bash tool/android_keystore.sh`（互動選單）建立 keystore 並上傳 secrets；沒有安裝 `gh` 的話選單裡有手動設定的步驟。
+  - **keystore 要備份**。弄丟或換掉之後，已經安裝的 App 裝不上新版，只能解除安裝重裝，本機紀錄會消失（先在「設定 → 資料備份」匯出）。
+  - 之前用 debug key 簽章安裝的版本，同樣要先匯出備份、解除安裝，才能裝第一個正式簽章的版本。
+
+### App 自動更新
+
+App 啟動時、之後每 6 小時，向 `https://api.github.com/repos/alianlbj23/smart_cup_app/releases/latest` 查詢（[lib/services/update_service.dart](lib/services/update_service.dart)；repo 寫在 [lib/app_info.dart](lib/app_info.dart) 的 `updateRepo`，**repo 必須是公開的**）。最新 release 的版本比 `appVersion` 新時，App 會自動跳出視窗說明新版本與更新內容，讓使用者選「立即更新」或「稍後再說」（同一個版本只主動問一次）。選了稍後，畫面上方會留著「有新版本」的提示列，按「查看」到「設定 → 軟體更新」；也可以在那裡手動按「檢查更新」。不會自己偷偷下載或重新啟動，一定要使用者按下「立即更新」或「下載並安裝」。
+
+| 平台 | 按「下載並安裝」之後 |
+| --- | --- |
+| Android | 下載 APK，開啟系統的安裝程式，使用者按「安裝」。第一次會先帶到系統設定，允許「智慧水杯」安裝應用程式後再回來按一次 |
+| Windows / Linux | 下載壓縮檔並解壓縮到暫存資料夾 → App 正常結束（會先斷開藍牙）→ 背景程式把新檔案蓋進 App 所在的資料夾 → 重新啟動（[lib/services/update_installer.dart](lib/services/update_installer.dart)）。App 所在的資料夾不能寫入時會提示手動下載 |
+| macOS / iOS | 不能由 App 自行安裝（macOS 版在 App Sandbox 裡，iOS 不允許），只提示有新版，可以複製下載頁的連結 |
+| Web | 沒有更新功能（重新整理就是新版） |
+
+- 下載網址只接受這個 repo、該版本 release 底下的固定檔名，下載完會核對檔案大小。Android 另外由系統檢查簽章：不是同一把 key 簽的 APK 裝不上去。
+- 更新不會動到本機的紀錄（SQLite 在 App 資料夾，不在安裝資料夾裡）。
+- Windows / Linux 的更新只會覆蓋和新增檔案，不會刪掉新版已經沒有的舊檔。暫存資料夾裡的 `smart_cup_update/update.log` 有背景程式的紀錄（App 60 秒內沒有結束時不會動任何檔案）。
+- macOS 目前連查詢都做不到：和連結照護系統一樣，缺 `com.apple.security.network.client` entitlement（見上面的 [macOS](#macos只能在-macos-上編譯)）。
+
 ## 驗證紀錄
 
 | 平台 | 狀態 |
@@ -325,6 +370,13 @@ flutter build web --release
 | Windows | 已用 `flutter build windows --release` 編譯成功（2026-10-29） |
 | Web | 已用 `flutter build web --release` 編譯成功（2026-11-25，1.1.0，含照護系統連結），尚未在瀏覽器實際執行；連結照護系統還需要 Server 允許跨來源請求（CORS），尚未驗證 |
 | macOS | 已加上藍牙權限設定（entitlement、Info.plist），還沒在 Mac 上編譯驗證 |
-| Android / iOS | 還沒在本機編譯驗證 |
+| Android | 已用 `flutter build apk --release` 編譯成功並確認簽章（2026-11-26），還沒裝到實機 |
+| iOS | 還沒在本機編譯驗證 |
+
+自動更新與發佈流程（2026-11-26）：
+
+- 已驗證：單元／widget 測試（假的 GitHub 回應）；對真的 GitHub API 查詢過（還沒有 release 時回報沒有更新）；Linux 的「解壓縮 → App 結束後替換檔案 → 重新啟動」用假的 App 資料夾實際執行過（[test/update_installer_test.dart](test/update_installer_test.dart)）；workflow 裡判斷要不要發佈的 shell 邏輯在本機用臨時 repo 跑過。
+- Android 已在本機用 `flutter build apk --release` 編譯成功（JDK 17、Android SDK 36）：沒有 `key.properties` 時是 debug key 簽章，用 `tool/android_keystore.sh` 建立 keystore 後是正式 key 簽章（`apksigner verify` 確認過）；APK 的 manifest 裡有安裝權限和 `FileProvider`。
+- **還沒驗證**：workflow 還沒在 GitHub Actions 上實際跑過；Android 版還沒裝到實機上，系統安裝程式那一段（`MainActivity.kt`）沒有實際執行過；`tool/android_keystore.sh` 上傳 secrets 的選項沒跑過；Windows 的替換流程要等 CI 的 Windows 工作跑同一個測試檔；iOS 的未簽章 IPA 沒有試裝過；還沒有用真的 release 從舊版更新到新版。
 
 1.1.0（2026-11-25）新增的韌體事件（0x07、3-byte ACK、Device Status 的 BLE 位址）與照護系統連結，目前只有單元／widget 測試（假的 BLE 與假的 HTTP client），**還沒有接實際的水杯與實際的 Server 驗證**。Linux 那一列的實機驗證是 1.0.0 的結果。

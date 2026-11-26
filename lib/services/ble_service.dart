@@ -385,9 +385,24 @@ class BleException implements Exception {
 }
 
 /// 智慧水杯 BLE 操作介面(單一裝置連線)。
+/// 平台回報的斷線原因(用來判斷是誰斷的)。
+///
+/// Android 常見的 [code]:8 = 連線逾時(兩邊有一邊沒收到對方)、19 = 水杯端主動斷線、
+/// 22 = 手機端主動斷線、133 = GATT_ERROR(Android 藍牙堆疊的通用錯誤)。
+class BleDisconnectReason {
+  const BleDisconnectReason({this.code, this.description});
+
+  final int? code;
+  final String? description;
+}
+
 abstract interface class BleService {
   /// 連線層狀態變化。
   Stream<BleConnectionState> get connectionState;
+
+  /// 最近一次斷線時平台回報的原因;還沒斷線過或平台沒提供時為 null。
+  /// 在 [connectionState] 送出 [BleConnectionState.disconnected] 時已更新。
+  BleDisconnectReason? get lastDisconnectReason;
 
   /// 掃描期間的即時結果(累積清單),供配對畫面即時更新。
   Stream<List<BleDeviceInfo>> get scanResults;

@@ -7,10 +7,14 @@ import '../data/intake_repository.dart';
 import '../services/backup_service.dart';
 import '../state/care_link_manager.dart';
 import '../state/care_sync.dart';
+import '../state/disconnect_log.dart';
+import '../state/update_manager.dart';
 import 'care_link_panel.dart';
+import 'disconnect_log_panel.dart';
 import 'theme.dart';
+import 'update_panel.dart';
 
-/// 設定:每日目標、水杯容量、照護系統(連結/解除)、資料備份(匯出/匯入)。
+/// 設定:每日目標、水杯容量、照護系統(連結/解除)、資料備份(匯出/匯入)、軟體更新。
 ///
 /// 和其他分頁一樣只是內容(ListView),需要放在有 [Scaffold] 的畫面裡才能顯示 SnackBar。
 class SettingsPage extends StatefulWidget {
@@ -21,15 +25,23 @@ class SettingsPage extends StatefulWidget {
     this.clock,
     this.care,
     this.careSync,
+    this.disconnectLog,
+    this.updates,
   });
 
   final IntakeRepository repo;
+
+  /// 水杯的斷線紀錄;有傳入才顯示「連線紀錄」區塊。
+  final DisconnectLog? disconnectLog;
 
   /// 照護系統的連結狀態;有傳入才顯示「照護系統」區塊。
   final CareLinkManager? care;
 
   /// 照護系統的背景同步(顯示待上傳筆數、「立即同步」)。
   final CareSync? careSync;
+
+  /// App 自動更新;有傳入才顯示「軟體更新」區塊。
+  final UpdateManager? updates;
 
   /// 檔案存取;測試時換成假的。
   final BackupFileIO fileIO;
@@ -113,6 +125,14 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 12),
         ],
         _backupPanel(),
+        if (widget.disconnectLog != null) ...[
+          const SizedBox(height: 12),
+          DisconnectLogPanel(log: widget.disconnectLog!),
+        ],
+        if (widget.updates != null) ...[
+          const SizedBox(height: 12),
+          UpdatePanel(updates: widget.updates!),
+        ],
       ],
     );
   }

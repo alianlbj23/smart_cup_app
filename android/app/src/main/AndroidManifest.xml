@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 照護系統:上傳飲水紀錄、讀取每日目標(HTTPS)。沒有這個權限 release 版連不上網 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- App 自動更新:下載新版 APK 後開啟系統的安裝程式(使用者仍要在系統畫面按「安裝」)-->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- BLE 權限(規格書 §7)-->
     <!-- Android 12+:neverForLocation 表示不以掃描結果推算位置,因此不需定位權限 -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
@@ -14,6 +16,11 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <!-- 前景服務:螢幕關掉、切到別的 App 時維持水杯的藍牙連線(flutter_foreground_task) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
         android:label="智慧水杯"
         android:name="${applicationName}"
@@ -40,6 +47,22 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- App 自動更新:把下載好的 APK 交給系統安裝程式讀取(只開放 update_file_paths.xml 列的資料夾)-->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.update_provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
+        <!-- 前景服務(名稱不能改)。connectedDevice:和藍牙裝置連線;滑掉 App 就停 -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="connectedDevice"
+            android:stopWithTask="true"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
