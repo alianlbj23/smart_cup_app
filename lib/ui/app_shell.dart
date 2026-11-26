@@ -104,26 +104,12 @@ class _AppShellState extends State<AppShell> {
     final accepted = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('有新版本 ${info.version}'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('目前版本 ${updates.currentVersion}', style: mutedSmall),
-              if (info.notes.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(info.notes, maxLines: 8, overflow: TextOverflow.ellipsis),
-              ],
-              const SizedBox(height: 12),
-              Text(
-                canInstall
-                    ? '要現在更新嗎?安裝新版不會刪除這台裝置上的紀錄。'
-                    : '這台裝置無法由 App 自行安裝新版,可以到「設定」取得下載連結。',
-                style: mutedSmall,
-              ),
-            ],
-          ),
+        // 使用者只需要知道可以更新;版本號和更新內容不顯示。
+        title: const Text('有新版本可以更新'),
+        content: Text(
+          canInstall
+              ? '更新不會刪除這台裝置上的紀錄。'
+              : '這台裝置無法由 App 自行安裝新版,可以到「設定」取得下載連結。',
         ),
         actions: [
           TextButton(

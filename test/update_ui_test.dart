@@ -73,7 +73,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('有新版:顯示版本與說明,按「下載並安裝」交給安裝器', (tester) async {
+    testWidgets('有新版:只顯示有新版本(不顯示更新說明),按「下載並安裝」交給安裝器', (tester) async {
       server
         ..latest = '1.2.0'
         ..notes = '修正藍牙斷線';
@@ -84,7 +84,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('有新版本 1.2.0'), findsOneWidget);
-      expect(find.text('修正藍牙斷線'), findsOneWidget);
+      // 使用者不需要看更新了什麼
+      expect(find.text('修正藍牙斷線'), findsNothing);
 
       // 下載會真的寫檔,要在 runAsync 裡等它做完。
       await tester.runAsync(() async {
@@ -211,7 +212,7 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('查到新版:自動跳出視窗,顯示版本與說明,讓使用者決定', (tester) async {
+    testWidgets('查到新版:自動跳出視窗,只問要不要更新(不顯示版本與說明)', (tester) async {
       server.notes = '修正藍牙斷線';
       final m = manager();
       await pumpApp(tester, m);
@@ -221,12 +222,18 @@ void main() {
 
       final dialog = find.byType(AlertDialog);
       expect(dialog, findsOneWidget);
-      expect(find.descendant(of: dialog, matching: find.text('有新版本 1.2.0')),
+      expect(find.descendant(of: dialog, matching: find.text('有新版本可以更新')),
           findsOneWidget);
-      expect(find.descendant(of: dialog, matching: find.text('目前版本 1.1.0')),
+      expect(
+          find.descendant(
+              of: dialog, matching: find.text('更新不會刪除這台裝置上的紀錄。')),
           findsOneWidget);
-      expect(find.descendant(of: dialog, matching: find.text('修正藍牙斷線')),
-          findsOneWidget);
+      // 版本號、更新說明都不顯示
+      expect(find.descendant(of: dialog, matching: find.textContaining('1.2.0')),
+          findsNothing);
+      expect(find.descendant(of: dialog, matching: find.textContaining('1.1.0')),
+          findsNothing);
+      expect(find.text('修正藍牙斷線'), findsNothing);
       expect(find.text('稍後再說'), findsOneWidget);
       expect(find.text('立即更新'), findsOneWidget);
       // 還沒按之前不會自己下載。

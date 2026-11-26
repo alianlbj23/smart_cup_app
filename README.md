@@ -1,6 +1,6 @@
 # smart_cup_app（智慧水杯）
 
-透過 BLE 連線 ESP32-C6 智慧水杯，顯示水量、姿態、飲水紀錄與統計的 Flutter App（版本 1.1.1）；可以連結照護系統，把飲水紀錄傳給照護人員。
+透過 BLE 連線 ESP32-C6 智慧水杯，顯示水量、姿態、飲水紀錄與統計的 Flutter App（版本 1.1.2）；可以連結照護系統，把飲水紀錄傳給照護人員。
 
 - BLE：`flutter_blue_plus`（只在 [lib/services/flutter_blue_plus_service.dart](lib/services/flutter_blue_plus_service.dart) 使用）
 - 本地儲存：飲水紀錄用 SQLite（`drift`，見[飲水紀錄與統計](#飲水紀錄與統計)）；記住的水杯用 `shared_preferences`
@@ -348,7 +348,7 @@ flutter build web --release
 
 ### App 自動更新
 
-App 啟動時、之後每 6 小時，向 `https://api.github.com/repos/alianlbj23/smart_cup_app/releases/latest` 查詢（[lib/services/update_service.dart](lib/services/update_service.dart)；repo 寫在 [lib/app_info.dart](lib/app_info.dart) 的 `updateRepo`，**repo 必須是公開的**）。最新 release 的版本比 `appVersion` 新時，App 會自動跳出視窗說明新版本與更新內容，讓使用者選「立即更新」或「稍後再說」（同一個版本只主動問一次）。選了稍後，畫面上方會留著「有新版本」的提示列，按「查看」到「設定 → 軟體更新」；也可以在那裡手動按「檢查更新」。不會自己偷偷下載或重新啟動，一定要使用者按下「立即更新」或「下載並安裝」。
+App 啟動時、之後每 6 小時，向 `https://api.github.com/repos/alianlbj23/smart_cup_app/releases/latest` 查詢（[lib/services/update_service.dart](lib/services/update_service.dart)；repo 寫在 [lib/app_info.dart](lib/app_info.dart) 的 `updateRepo`，**repo 必須是公開的**）。最新 release 的版本比 `appVersion` 新時，App 會自動跳出視窗告知有新版本可以更新（不顯示版本號和更新內容），讓使用者選「立即更新」或「稍後再說」（同一個版本只主動問一次）。選了稍後，畫面上方會留著「有新版本」的提示列，按「查看」到「設定 → 軟體更新」；也可以在那裡手動按「檢查更新」。不會自己偷偷下載或重新啟動，一定要使用者按下「立即更新」或「下載並安裝」。
 
 | 平台 | 按「下載並安裝」之後 |
 | --- | --- |

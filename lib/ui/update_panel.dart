@@ -50,15 +50,6 @@ class UpdatePanel extends StatelessWidget {
             color: AppColors.teal,
           ),
         ),
-        if (info.notes.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(
-            info.notes,
-            maxLines: 8,
-            overflow: TextOverflow.ellipsis,
-            style: mutedSmall,
-          ),
-        ],
       ] else if (updates.phase == UpdatePhase.upToDate) ...[
         const SizedBox(height: 12),
         const Text('已是最新版本'),
