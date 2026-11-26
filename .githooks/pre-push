@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# push 前檢查「還沒在任何遠端上的 commit」有沒有敏感資料。
+# 這一層會擋下用 --no-verify 跳過 pre-commit、或 hook 啟用前就 commit 的內容。
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+status=0
+
+# git 從 stdin 傳入：<local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  # 全為 0 代表刪除遠端分支，沒有內容要檢查。
+  if [[ "$local_sha" =~ ^0+$ ]]; then
+    continue
+  fi
+  bash "$root/tool/check_secrets.sh" --commits "$local_sha" --not --remotes || status=1
+done
+
+exit "$status"
