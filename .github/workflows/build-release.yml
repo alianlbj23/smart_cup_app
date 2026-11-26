@@ -23,6 +23,7 @@ concurrency:
 
 env:
   APP_NAME: stut_food_intake_project
+  FLUTTER_VERSION: '3.47.6'
 
 jobs:
   prepare:
@@ -75,6 +76,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # 固定版本:每次抓最新版的話,新版 Flutter 提高 Android Gradle Plugin 的最低版本
+          # 或新增棄用警告時,沒改程式碼也會編譯、分析失敗。升級時這裡和開發機一起調。
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Install dependencies
@@ -123,6 +127,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # 固定版本:每次抓最新版的話,新版 Flutter 提高 Android Gradle Plugin 的最低版本
+          # 或新增棄用警告時,沒改程式碼也會編譯、分析失敗。升級時這裡和開發機一起調。
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Flutter version
