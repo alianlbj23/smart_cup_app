@@ -8,6 +8,7 @@ import 'package:stut_food_intake_project/main.dart';
 import 'package:stut_food_intake_project/services/ble_service.dart';
 import 'package:stut_food_intake_project/state/cup_connection_manager.dart';
 import 'package:stut_food_intake_project/ui/cup_reading.dart';
+import 'package:stut_food_intake_project/ui/searching_indicator.dart';
 import 'package:stut_food_intake_project/ui/theme.dart';
 
 import 'fakes/fake_ble_service.dart';
@@ -47,7 +48,10 @@ void main() {
     await tester.pumpWidget(SmartCupApp(manager: manager, repo: repo));
     if (remembered != null) {
       manager.init();
-      await tester.pumpAndSettle();
+      // 找不到水杯時畫面上有一直在動的「尋找中」動畫,不能用 pumpAndSettle 等它靜止。
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
     }
     await tester.pump();
   }
@@ -319,12 +323,54 @@ void main() {
     expect(find.text('目前連線:找不到水杯'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, '重試'), findsOneWidget);
     expect(find.text('中斷連線'), findsNothing);
+    // 找不到時 App 會自己一直找:畫面要看得出來正在尋找
+    expect(find.byType(SearchingIndicator), findsOneWidget);
+    expect(find.text('持續尋找中,找到會自動連上'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
 
     ble.devicesInRange = [_cup];
     await tester.tap(find.widgetWithText(FilledButton, '重試'));
     await tester.pumpAndSettle();
 
     expect(manager.state, CupConnectionState.ready);
+    // 連上之後動畫消失
+    expect(find.byType(SearchingIndicator), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.byIcon(Icons.bluetooth_connected), findsOneWidget);
+  });
+
+  testWidgets('找不到水杯時不用按「重試」:水杯出現後幾秒內自動連上', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000), remembered: _cup);
+    expect(manager.state, CupConnectionState.notFound);
+
+    ble.devicesInRange = [_cup];
+    // 預設每 2 秒自動再找一次
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+
+    expect(manager.state, CupConnectionState.ready);
+    expect(find.text('目前連線:已連線'), findsOneWidget);
+  });
+
+  testWidgets('未配對、未連線時沒有尋找動畫', (tester) async {
+    await pumpApp(tester, const Size(1400, 1000));
+
+    expect(find.byType(SearchingIndicator), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
+  testWidgets('系統關閉動畫時:尋找圖示靜止,不會一直重畫', (tester) async {
+    await tester.pumpWidget(const MediaQuery(
+      data: MediaQueryData(disableAnimations: true),
+      child: Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(child: SearchingIndicator()),
+      ),
+    ));
+
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.bluetooth_searching), findsOneWidget);
   });
 
   testWidgets('配對時找不到水杯 → 提示並可取消,維持未連線', (tester) async {

@@ -64,7 +64,9 @@ class CupConnectionManager extends ChangeNotifier {
   CupConnectionManager({
     required BleService ble,
     DeviceStore? store,
-    this.backgroundRetryInterval = const Duration(seconds: 20),
+    this.backgroundRetryInterval = const Duration(seconds: 10),
+    this.fastRetryInterval = const Duration(seconds: 2),
+    this.fastRetryCount = 20,
   })  : _ble = ble,
         _store = store ?? DeviceStore() {
     _subs = [
@@ -82,12 +84,28 @@ class CupConnectionManager extends ChangeNotifier {
   static const maxReconnectAttempts = 3;
   static const maxLogEntries = 50;
 
-  /// 找不到記憶的水杯([CupConnectionState.notFound])時,隔多久在背景再試一次。
+  /// 找不到記憶的水杯([CupConnectionState.notFound])時,隔多久在背景再試一次
+  /// (已經連續找不到 [fastRetryCount] 次之後的間隔)。
   ///
   /// 水杯靜止一段時間會進入深度睡眠(韌體 smart_cup_firmware),拿起杯子才會醒來並
   /// 廣播至少 30 秒;間隔要比這段時間短,醒來後才接得到。
   final Duration backgroundRetryInterval;
+
+  /// 剛找不到水杯時的重試間隔:幾乎不間斷地找,水杯一出現就連上,使用者不用自己按
+  /// 「重試」。每次掃描最長 [reconnectScanTimeout],所以預設值下前 5–6 分鐘都在找。
+  final Duration fastRetryInterval;
+
+  /// 連續找不到幾次之後,間隔從 [fastRetryInterval] 放慢成 [backgroundRetryInterval]
+  /// (水杯可能關機或不在附近,一直掃描會耗手機的電)。
+  final int fastRetryCount;
+
   Timer? _retryTimer;
+
+  /// 連續幾次自動重試都找不到;連上、或使用者自己操作時歸零。
+  int _notFoundStreak = 0;
+
+  /// 找不到水杯,正在等下一次自動重試(畫面用來顯示「持續尋找中」)。
+  bool get autoRetryPending => _retryTimer != null;
 
   /// 超過此時間沒收到 WATER 就視為過期(韌體每 1 秒送一次)。
   static const waterStaleAfter = Duration(seconds: 5);
@@ -296,7 +314,20 @@ class CupConnectionManager extends ChangeNotifier {
   /// 自動重連:定向掃描記憶的 deviceId,找到後自動連線;15 秒找不到 → [CupConnectionState.notFound]。
   Future<void> startAutoReconnect() {
     _reconnectAttempts = 0;
+    // 使用者按「重試」、切換水杯或剛斷線:重新從密集重試開始
+    _notFoundStreak = 0;
     return _startAutoReconnect();
+  }
+
+  /// App 回到前景:使用者打開 App 就是想看到水杯連上,正在等下一次重試的話立刻再找。
+  /// 已連線、連線中、未配對,或使用者自己按了「中斷連線」(idle)時不做任何事。
+  void onAppResumed() {
+    if (_disposed ||
+        _state != CupConnectionState.notFound ||
+        _remembered == null) {
+      return;
+    }
+    unawaited(startAutoReconnect());
   }
 
   Future<void> _startAutoReconnect() async {
@@ -388,6 +419,7 @@ class CupConnectionManager extends ChangeNotifier {
       if (session != _session) return;
       _remembered = remembered;
       _reconnectAttempts = 0;
+      _notFoundStreak = 0;
       _setState(CupConnectionState.ready);
     } catch (e) {
       if (session != _session) return;
@@ -619,19 +651,26 @@ class CupConnectionManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// notFound 且有記憶的水杯 → [backgroundRetryInterval] 後自動再定向掃描一次。
+  /// notFound 且有記憶的水杯 → 過一下自動再定向掃描一次。前 [fastRetryCount] 次間隔
+  /// [fastRetryInterval],之後放慢成 [backgroundRetryInterval]。
   /// 水杯休眠時會一直重複,直到找到、使用者改做其他操作或 dispose。
   void _scheduleBackgroundRetry() {
     _retryTimer?.cancel();
+    _retryTimer = null;
     if (_remembered == null) return;
-    _retryTimer = Timer(backgroundRetryInterval, () {
+    final fast = _notFoundStreak < fastRetryCount &&
+        fastRetryInterval < backgroundRetryInterval;
+    _notFoundStreak++;
+    _retryTimer = Timer(fast ? fastRetryInterval : backgroundRetryInterval, () {
       _retryTimer = null;
       if (_disposed ||
           _state != CupConnectionState.notFound ||
           _remembered == null) {
         return;
       }
-      unawaited(startAutoReconnect());
+      // 不經過 startAutoReconnect():那會把連續找不到的次數歸零
+      _reconnectAttempts = 0;
+      unawaited(_startAutoReconnect());
     });
   }
 

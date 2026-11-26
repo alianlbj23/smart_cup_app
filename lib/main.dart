@@ -88,7 +88,11 @@ Future<void> main() async {
   AppLifecycleListener(
     // Android 12 起背景不准啟動前景服務:之前沒啟動成功的話,回到前景再試;
     // 通知權限也只能在前景詢問
-    onResume: keepAlive.onAppResumed,
+    onResume: () {
+      keepAlive.onAppResumed();
+      // 正在等下一次重試的話,打開 App 就立刻再找一次水杯
+      manager.onAppResumed();
+    },
     onExitRequested: () async {
       // 前景服務停不掉也不能拖住退出;最多等 3 秒。
       await keepAlive

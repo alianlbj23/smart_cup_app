@@ -137,6 +137,126 @@ void main() {
       expect(ble.connectCalls.single, 'AA:BB');
     });
 
+    group('找不到水杯時的重試節奏', () {
+      /// 快:每 20 ms、最多 3 次;之後放慢(1 小時,等於測試期間不會再試)。
+      CupConnectionManager newManager() => CupConnectionManager(
+            ble: ble,
+            store: store,
+            fastRetryInterval: const Duration(milliseconds: 20),
+            fastRetryCount: 3,
+            backgroundRetryInterval: const Duration(hours: 1),
+          );
+
+      Future<void> wait(int ms) async {
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        await settle();
+      }
+
+      test('剛找不到時密集重試;連續好幾次都找不到才放慢', () async {
+        manager.dispose();
+        manager = newManager();
+        await remember(_cup);
+        await manager.init();
+        await settle();
+        expect(manager.state, CupConnectionState.notFound);
+        expect(ble.scanCalls, hasLength(1));
+        expect(manager.autoRetryPending, isTrue);
+
+        await wait(300);
+
+        // 第一次 + 3 次密集重試,之後要等很久才會再試
+        expect(ble.scanCalls, hasLength(4));
+        expect(manager.state, CupConnectionState.notFound);
+        expect(manager.autoRetryPending, isTrue);
+      });
+
+      test('密集重試期間水杯出現 → 很快自動連上', () async {
+        manager.dispose();
+        manager = newManager();
+        await remember(_cup);
+        await manager.init();
+        await settle();
+
+        ble.devicesInRange = [_cup];
+        await wait(100);
+
+        expect(manager.state, CupConnectionState.ready);
+        expect(manager.autoRetryPending, isFalse);
+      });
+
+      test('放慢之後使用者按「重試」→ 重新開始密集重試', () async {
+        manager.dispose();
+        manager = newManager();
+        await remember(_cup);
+        await manager.init();
+        await wait(300);
+        expect(ble.scanCalls, hasLength(4));
+
+        await manager.startAutoReconnect();
+        await wait(300);
+
+        expect(ble.scanCalls, hasLength(8));
+      });
+
+      test('連上之後又斷線找不到 → 重新開始密集重試', () async {
+        manager.dispose();
+        manager = newManager();
+        await remember(_cup);
+        await manager.init();
+        await wait(300);
+        expect(ble.scanCalls, hasLength(4));
+
+        ble.devicesInRange = [_cup];
+        await manager.startAutoReconnect();
+        await settle();
+        expect(manager.state, CupConnectionState.ready);
+        final before = ble.scanCalls.length;
+
+        ble.devicesInRange = [];
+        ble.dropLink();
+        await wait(300);
+
+        // 斷線後馬上找一次 + 3 次密集重試
+        expect(ble.scanCalls, hasLength(before + 4));
+      });
+
+      test('App 回到前景:正在等下一次重試 → 立刻再找一次', () async {
+        manager.dispose();
+        manager = newManager();
+        await remember(_cup);
+        await manager.init();
+        await wait(300);
+        expect(ble.scanCalls, hasLength(4));
+        ble.devicesInRange = [_cup];
+
+        manager.onAppResumed();
+        await settle();
+
+        expect(manager.state, CupConnectionState.ready);
+      });
+
+      test('App 回到前景:已連線、未配對、使用者已中斷時什麼都不做', () async {
+        await manager.init();
+        manager.onAppResumed();
+        await settle();
+        expect(ble.scanCalls, isEmpty);
+
+        ble.devicesInRange = [_cup];
+        await manager.connectTo(_cup);
+        await settle();
+        final scans = ble.scanCalls.length;
+        manager.onAppResumed();
+        await settle();
+        expect(ble.scanCalls, hasLength(scans));
+
+        await manager.disconnect();
+        manager.onAppResumed();
+        await settle();
+        expect(ble.scanCalls, hasLength(scans));
+        expect(manager.state, CupConnectionState.idle);
+      });
+    });
+
     test('使用者主動中斷 → 不再背景重試', () async {
       manager.dispose();
       manager = CupConnectionManager(

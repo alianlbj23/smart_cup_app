@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../state/intake_stats.dart';
 import '../theme.dart';
 import 'chart_style.dart';
+import 'chart_zoom.dart';
 
 /// 一天的時間分布圖:上下兩張共用同一條 0–24 時的 X 軸。
 ///
@@ -13,6 +14,8 @@ import 'chart_style.dart';
 ///
 /// 兩者量級不同(累積到 1,500 vs 單次 200),不放在同一張圖、也不用雙 Y 軸,
 /// 改成上下對齊的兩張小圖。06–20 的清醒時段以淡色底標出。
+///
+/// 兩張圖可以沿時間軸一起放大、移動(見 [ChartZoom]);換一天就還原。
 class DayDistributionChart extends StatelessWidget {
   const DayDistributionChart({super.key, required this.stats});
 
@@ -35,12 +38,30 @@ class DayDistributionChart extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        SizedBox(height: 170, child: _CumulativeChart(stats: stats)),
-        const SizedBox(height: 12),
-        const Text('每次喝水量', style: mutedSmall),
-        const SizedBox(height: 4),
-        // 高度包含 X 軸文字,避免卡片出現內捲動。
-        SizedBox(height: 110, child: _DrinkStemsChart(stats: stats)),
+        ChartZoom(
+          key: ValueKey(stats.day),
+          // 最多放大到畫面寬度約等於 1 小時
+          maxScale: 24,
+          builder: (context, zoom, scale) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 170,
+                child:
+                    _CumulativeChart(stats: stats, zoom: zoom, scale: scale),
+              ),
+              const SizedBox(height: 12),
+              const Text('每次喝水量', style: mutedSmall),
+              const SizedBox(height: 4),
+              // 高度包含 X 軸文字,避免卡片出現內捲動。
+              SizedBox(
+                height: 110,
+                child:
+                    _DrinkStemsChart(stats: stats, zoom: zoom, scale: scale),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -52,9 +73,9 @@ double _hourX(DateTime day, DateTime t) {
   return x.clamp(0, 24).toDouble();
 }
 
-FlGridData _grid(double yInterval) => FlGridData(
+FlGridData _grid(double yInterval, double hourInterval) => FlGridData(
       drawVerticalLine: true,
-      verticalInterval: 6,
+      verticalInterval: hourInterval,
       horizontalInterval: yInterval,
       getDrawingHorizontalLine: (_) =>
           const FlLine(color: ChartStyle.grid, strokeWidth: 1),
@@ -78,15 +99,15 @@ AxisTitles _leftTitles(double interval, double maxY) => AxisTitles(
       ),
     );
 
-AxisTitles _hourTitles({required bool show}) => AxisTitles(
+AxisTitles _hourTitles({required bool show, required double interval}) =>
+    AxisTitles(
       sideTitles: SideTitles(
         showTitles: show,
         reservedSize: 22,
-        interval: 6,
+        interval: interval,
         getTitlesWidget: (v, meta) => SideTitleWidget(
           meta: meta,
-          child: Text(v.toInt().toString().padLeft(2, '0'),
-              style: ChartStyle.axisText),
+          child: Text(hourAxisLabel(v), style: ChartStyle.axisText),
         ),
       ),
     );
@@ -131,9 +152,15 @@ LineTouchTooltipData _tooltip(GetLineTooltipItems items) => LineTouchTooltipData
     );
 
 class _CumulativeChart extends StatelessWidget {
-  const _CumulativeChart({required this.stats});
+  const _CumulativeChart({
+    required this.stats,
+    required this.zoom,
+    required this.scale,
+  });
 
   final DayStats stats;
+  final FlTransformationConfig zoom;
+  final double scale;
 
   @override
   Widget build(BuildContext context) {
@@ -189,13 +216,14 @@ class _CumulativeChart extends StatelessWidget {
         minY: 0,
         maxY: maxY,
         clipData: const FlClipData.all(),
-        gridData: _grid(interval),
+        gridData: _grid(interval, hourIntervalForScale(scale)),
         borderData: FlBorderData(show: false),
         rangeAnnotations: _wakingBand(),
         extraLinesData: _nowLine(s),
         titlesData: FlTitlesData(
           leftTitles: _leftTitles(interval, maxY),
-          bottomTitles: _hourTitles(show: true),
+          bottomTitles: _hourTitles(
+              show: true, interval: hourIntervalForScale(scale)),
           topTitles: _noTitles,
           rightTitles: _noTitles,
         ),
@@ -222,15 +250,22 @@ class _CumulativeChart extends StatelessWidget {
               ]),
         ),
       ),
+      transformationConfig: zoom,
       duration: Duration.zero,
     );
   }
 }
 
 class _DrinkStemsChart extends StatelessWidget {
-  const _DrinkStemsChart({required this.stats});
+  const _DrinkStemsChart({
+    required this.stats,
+    required this.zoom,
+    required this.scale,
+  });
 
   final DayStats stats;
+  final FlTransformationConfig zoom;
+  final double scale;
 
   @override
   Widget build(BuildContext context) {
@@ -267,8 +302,10 @@ class _DrinkStemsChart extends StatelessWidget {
         maxX: 24,
         minY: 0,
         maxY: maxY,
-        clipData: const FlClipData.none(),
-        gridData: _grid(interval),
+        // 左右要裁切:放大後畫面外的棒子不能蓋到座標軸。上方不裁,頂端的圓點才完整。
+        clipData: const FlClipData(
+            top: false, bottom: false, left: true, right: true),
+        gridData: _grid(interval, hourIntervalForScale(scale)),
         borderData: FlBorderData(
           show: true,
           border: const Border(
@@ -277,7 +314,8 @@ class _DrinkStemsChart extends StatelessWidget {
         rangeAnnotations: _wakingBand(),
         titlesData: FlTitlesData(
           leftTitles: _leftTitles(interval, maxY),
-          bottomTitles: _hourTitles(show: true),
+          bottomTitles: _hourTitles(
+              show: true, interval: hourIntervalForScale(scale)),
           topTitles: _noTitles,
           rightTitles: _noTitles,
         ),
@@ -306,6 +344,7 @@ class _DrinkStemsChart extends StatelessWidget {
           }),
         ),
       ),
+      transformationConfig: zoom,
       duration: Duration.zero,
     );
 
