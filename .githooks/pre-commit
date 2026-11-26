@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# commit 前檢查已 git add 的內容有沒有敏感資料。
+# 啟用方式（每個 clone 做一次）：bash tool/check_secrets.sh --install-hooks
+set -euo pipefail
+exec bash "$(git rev-parse --show-toplevel)/tool/check_secrets.sh" --staged

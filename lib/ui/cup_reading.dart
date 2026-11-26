@@ -78,8 +78,7 @@ class CupReading extends StatelessWidget {
                         ? '已連線,等待第一筆水量…'
                         : stale
                             ? '資料過期 · 更新於 ${fmtTime(updatedAt!)}'
-                            : 'fill25 ${water.fill25} · 刻度 ${water.level} · '
-                                '更新於 ${fmtTime(updatedAt!)}',
+                            : '更新於 ${fmtTime(updatedAt!)}',
                 style: mutedSmall.copyWith(
                     color: dozing
                         ? AppColors.night

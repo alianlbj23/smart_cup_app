@@ -8,7 +8,7 @@ import 'cup_reading.dart';
 import 'doze_banner.dart';
 import 'theme.dart';
 
-/// 水杯裝置:目前連線、水量、姿態與接收紀錄。App 一次連線一個水杯。
+/// 水杯裝置:目前連線、水量與姿態。App 一次連線一個水杯。
 class CupPage extends StatelessWidget {
   const CupPage({super.key, required this.manager, required this.now});
 
@@ -58,8 +58,6 @@ class CupPage extends StatelessWidget {
         const SizedBox(height: 12),
         // 姿態面板同樣永遠顯示;未連線或資料過期時以灰色呈現。
         Panel(child: CupAttitude(manager: manager, now: now)),
-        const SizedBox(height: 12),
-        _logPanel(),
       ],
     );
   }
@@ -159,43 +157,6 @@ class CupPage extends StatelessWidget {
                 ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _logPanel() {
-    final log = manager.log.reversed.toList();
-    return Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text('水杯資料接收紀錄',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-          Text(
-            '水量、姿態與休眠狀態來自韌體;原始值僅供除錯;即時姿態角不列入 · '
-            '已接收 ${manager.receivedCount} 筆',
-            style: mutedSmall,
-          ),
-          const SizedBox(height: 8),
-          if (log.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text('尚未收到資料', style: mutedSmall),
-            ),
-          for (final e in log)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  Icon(e.acked ? Icons.done_all : Icons.schedule,
-                      size: 16, color: AppColors.muted),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(describePacket(e.packet))),
-                  Text('${fmtTime(e.receivedAt)} 收到', style: mutedSmall),
-                ],
-              ),
-            ),
         ],
       ),
     );
