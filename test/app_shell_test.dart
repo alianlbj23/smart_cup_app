@@ -7,6 +7,7 @@ import 'package:stut_food_intake_project/data/intake_repository.dart';
 import 'package:stut_food_intake_project/main.dart';
 import 'package:stut_food_intake_project/services/ble_service.dart';
 import 'package:stut_food_intake_project/state/cup_connection_manager.dart';
+import 'package:stut_food_intake_project/ui/cup_reading.dart';
 import 'package:stut_food_intake_project/ui/theme.dart';
 
 import 'fakes/fake_ble_service.dart';
@@ -64,7 +65,8 @@ void main() {
 
     expect(find.text('目前連線:未連線'), findsOneWidget);
     expect(find.text('配對水杯'), findsOneWidget);
-    expect(find.text('尚未收到資料'), findsOneWidget);
+    expect(find.text('水杯資料接收紀錄'), findsNothing);
+    expect(find.text('尚未收到資料'), findsNothing);
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -96,7 +98,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('配對水杯 → 連線成功後顯示電量、水量與接收紀錄', (tester) async {
+  testWidgets('配對水杯 → 連線成功後顯示電量與水量;不顯示接收紀錄', (tester) async {
     await pumpApp(tester, const Size(1400, 1000));
     await pairCup(tester);
 
@@ -112,10 +114,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('100.0000'), findsOneWidget);
+    // 接收紀錄只留在 manager 裡,畫面上不顯示。
+    expect(manager.receivedCount, 1);
+    expect(find.text('水杯資料接收紀錄'), findsNothing);
+    expect(find.textContaining('已接收'), findsNothing);
     expect(
         find.text('水量 100.0000% · 刻度 10 · fill25 ${WaterPacket.fill25Max}'),
-        findsOneWidget);
-    expect(find.textContaining('已接收 1 筆'), findsOneWidget);
+        findsNothing);
+    // 水位圖下方只顯示更新時間,不顯示除錯用的原始值。
+    expect(find.textContaining('fill25'), findsNothing);
+    expect(find.textContaining('刻度'), findsNothing);
+    expect(find.textContaining('更新於'), findsWidgets);
   });
 
   testWidgets('電量未知(0xFF)→ 顯示「--」與「電量未知」;低電量變紅色', (tester) async {
@@ -165,7 +174,7 @@ void main() {
     expect(find.widgetWithText(Chip, '飲用中'), findsOneWidget);
     expect(find.widgetWithText(Chip, '移動中'), findsOneWidget);
     // ATTITUDE 不算進接收紀錄。
-    expect(find.textContaining('已接收 2 筆'), findsOneWidget);
+    expect(manager.receivedCount, 2);
     expect(tester.takeException(), isNull);
   });
 
@@ -219,15 +228,17 @@ void main() {
     expect(find.text('傾斜 1.8°'), findsOneWidget);
 
     // 接收紀錄:只記「進入休眠」,不記時間
-    expect(find.text('水杯進入休眠'), findsOneWidget);
-    expect(find.textContaining('已接收 3 筆'), findsOneWidget);
+    expect(describePacket(manager.log.last.packet), '水杯進入休眠');
+    expect(manager.receivedCount, 3);
+    expect(find.text('水杯進入休眠'), findsNothing);
 
     // 休眠中的 keepalive(狀態沒變)不寫進接收紀錄
     ble.pushPacket(const StatePacket(
         activity: CupActivity.dozing, secondsInState: 85, timestamp: 2));
     await tester.pumpAndSettle();
-    expect(find.text('水杯進入休眠'), findsOneWidget);
-    expect(find.textContaining('已接收 3 筆'), findsOneWidget);
+    expect(describePacket(manager.log.last.packet), '水杯進入休眠');
+    expect(manager.receivedCount, 3);
+    expect(find.text('水杯進入休眠'), findsNothing);
 
     // 喚醒 → 回到一般畫面
     ble.pushPacket(const StatePacket(
@@ -245,7 +256,8 @@ void main() {
     expect(find.widgetWithText(Chip, '直立'), findsOneWidget);
     expect(find.widgetWithText(Chip, '移動中'), findsOneWidget);
     expect(find.textContaining('即時姿態 · 更新於'), findsOneWidget);
-    expect(find.text('水杯已喚醒'), findsOneWidget);
+    expect(manager.log.map((e) => describePacket(e.packet)), contains('水杯已喚醒'));
+    expect(find.text('水杯已喚醒'), findsNothing);
     expect(find.textContaining('資料過期'), findsNothing);
     expect(tester.takeException(), isNull);
   });
