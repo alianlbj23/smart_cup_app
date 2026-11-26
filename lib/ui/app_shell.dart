@@ -6,6 +6,7 @@ import '../data/intake_repository.dart';
 import '../state/care_link_manager.dart';
 import '../state/care_sync.dart';
 import '../state/cup_connection_manager.dart';
+import '../state/update_manager.dart';
 import 'cup_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
@@ -18,6 +19,7 @@ class AppShell extends StatefulWidget {
     required this.repo,
     this.care,
     this.careSync,
+    this.updates,
   });
 
   final CupConnectionManager manager;
@@ -27,11 +29,16 @@ class AppShell extends StatefulWidget {
   final CareLinkManager? care;
   final CareSync? careSync;
 
+  /// App 自動更新;有傳入時查到新版會在上方提示,「設定」頁有「軟體更新」區塊。
+  final UpdateManager? updates;
+
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
 class _AppShellState extends State<AppShell> {
+  static const _settingsTab = 2;
+
   late final Timer _refreshTimer;
   int _tab = 0;
 
@@ -65,6 +72,7 @@ class _AppShellState extends State<AppShell> {
             repo: widget.repo,
             care: widget.care,
             careSync: widget.careSync,
+            updates: widget.updates,
           ),
     ];
     return Scaffold(
@@ -73,6 +81,24 @@ class _AppShellState extends State<AppShell> {
           children: [
             const _TopBar(),
             const Divider(),
+            if (widget.updates != null)
+              ListenableBuilder(
+                listenable: widget.updates!,
+                builder: (context, _) {
+                  final info = widget.updates!.available;
+                  // 已經在設定頁就不用再提示。
+                  if (info == null || _tab == _settingsTab) {
+                    return const SizedBox.shrink();
+                  }
+                  return _UpdateBanner(
+                    version: info.version,
+                    onView: () => setState(() {
+                      _tab = _settingsTab;
+                      _visited.add(_settingsTab);
+                    }),
+                  );
+                },
+              ),
             Expanded(
               child: IndexedStack(
                 index: _tab,
@@ -110,6 +136,40 @@ class _AppShellState extends State<AppShell> {
             label: '設定',
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 查到新版時的提示列;按「查看」切到設定頁的「軟體更新」。
+class _UpdateBanner extends StatelessWidget {
+  const _UpdateBanner({required this.version, required this.onView});
+
+  final String version;
+  final VoidCallback onView;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.bg,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 16, right: 8),
+        child: Row(
+          children: [
+            const Icon(Icons.system_update_alt,
+                color: AppColors.teal, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '有新版本 $version',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            TextButton(onPressed: onView, child: const Text('查看')),
+          ],
+        ),
       ),
     );
   }

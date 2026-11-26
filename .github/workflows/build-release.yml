@@ -1,0 +1,266 @@
+name: Build & Release
+
+# 每次推到 main:跑測試、編譯五個平台(Linux / Windows / macOS / Android / iOS)。
+# pubspec.yaml 的 version 還沒有對應的 tag(vX.Y.Z)時,自動建立 tag 與 GitHub Release
+# 並附上各平台的執行檔;App 內的自動更新(lib/services/update_service.dart)就是讀這裡
+# 的最新 release。要發新版:把 pubspec.yaml 的 version 調高再推到 main。
+#
+# 安裝檔的檔名是 App 自動更新認的名字,要和 UpdatePlatform.assetName 一致,不要改。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  APP_NAME: stut_food_intake_project
+
+jobs:
+  prepare:
+    name: Detect version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version and decide whether to release
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version:[[:space:]]*\([0-9]\{1,6\}\.[0-9]\{1,6\}\.[0-9]\{1,6\}\)\(+[0-9]\{1,9\}\)\{0,1\}[[:space:]]*$/\1/p' pubspec.yaml | head -n 1)
+          if [ -z "$version" ]; then
+            echo "::error file=pubspec.yaml::version 必須是 major.minor.patch 或 major.minor.patch+build"
+            exit 1
+          fi
+          tag="v$version"
+          release=false
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            # annotated tag 會多一行 ^{}(指向的 commit),取最後一行。
+            tag_sha=$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}" | tail -n 1 | cut -f 1)
+            if [ -z "$tag_sha" ]; then
+              release=true
+              echo "::notice::$tag 還沒發佈過,這次會建立 release"
+            elif [ "$tag_sha" = "$GITHUB_SHA" ]; then
+              # 同一個 commit 重跑:補上上次沒編出來的平台。
+              release=true
+              echo "::notice::$tag 就是這個 commit,這次會補齊 release 的檔案"
+            else
+              echo "::notice::$tag 已經發佈過,這次只編譯不發佈。要發新版請把 pubspec.yaml 的 version 調高"
+            fi
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "release=$release"
+          } >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-latest
+          - platform: windows
+            os: windows-latest
+          - platform: macos
+            os: macos-latest
+          - platform: android
+            os: ubuntu-latest
+          - platform: ios
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 自動更新在 Windows 上「解壓縮 → 替換檔案 → 重新啟動」的流程只有在 Windows 才測得到。
+      - name: Test the Windows updater
+        if: matrix.platform == 'windows'
+        run: flutter test test/update_installer_test.dart
+
+      # 自動更新要能裝上去,每一版都要用同一把 key 簽章。keystore 由 secrets 提供
+      # (用 tool/android_keystore.sh 建立與上傳);沒有 secrets 時不發佈 Android 版。
+      - name: Set up Android release signing
+        if: matrix.platform == 'android'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          RELEASE: ${{ needs.prepare.outputs.release }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            if [ "$RELEASE" = "true" ]; then
+              echo "::error::沒有設定 Android 簽章的 secrets(ANDROID_KEYSTORE_BASE64、ANDROID_KEYSTORE_PASSWORD、ANDROID_KEY_ALIAS、ANDROID_KEY_PASSWORD),不發佈 Android 版。請執行 tool/android_keystore.sh 建立並上傳,再重跑這個工作。"
+              exit 1
+            fi
+            echo "::warning::沒有 Android 簽章的 secrets,這次用 debug key 簽章(只確認能編譯,不會發佈)"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          {
+            echo "storeFile=app/upload-keystore.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+
+      - name: Build (desktop)
+        if: matrix.platform == 'linux' || matrix.platform == 'windows' || matrix.platform == 'macos'
+        run: flutter build ${{ matrix.platform }} --release
+
+      - name: Build (Android)
+        if: matrix.platform == 'android'
+        run: flutter build apk --release
+
+      # 沒有 Apple Developer 簽章:產出未簽章的 IPA,要自行簽章(sideload)才能安裝。
+      - name: Build (iOS, unsigned)
+        if: matrix.platform == 'ios'
+        run: flutter build ios --release --no-codesign
+
+      - name: Package (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          tar -czf smart_cup_app-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+
+      - name: Package (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath smart_cup_app-windows-x64.zip
+
+      - name: Package (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "build/macos/Build/Products/Release/${APP_NAME}.app" smart_cup_app-macos.zip
+
+      - name: Package (Android)
+        if: matrix.platform == 'android'
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk smart_cup_app-android.apk
+
+      - name: Package (iOS)
+        if: matrix.platform == 'ios'
+        run: |
+          set -euo pipefail
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry smart_cup_app-ios-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smart_cup_app-${{ matrix.platform }}
+          path: smart_cup_app-*.*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    # 測試要通過才發佈。某個平台編譯失敗時,其餘平台照樣發佈(這次執行仍會顯示失敗);
+    # 修好後對同一個 commit 重跑失敗的工作,就會把缺的檔案補上。
+    if: ${{ !cancelled() && needs.prepare.outputs.release == 'true' && needs.test.result == 'success' }}
+    needs: [prepare, test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums and release notes
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd dist
+          missing=""
+          for f in smart_cup_app-linux-x64.tar.gz smart_cup_app-windows-x64.zip smart_cup_app-macos.zip smart_cup_app-android.apk smart_cup_app-ios-unsigned.ipa; do
+            [ -f "$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::這次的 release 缺少:$missing"
+          fi
+          sha256sum smart_cup_app-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+          # 說明用上一版之後的 commit 標題(App 的「軟體更新」會直接顯示這段文字)。
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$GITHUB_SHA^" 2>/dev/null || true)
+          if [ -n "$prev" ] && [ "$prev" != "$TAG" ]; then
+            git log --no-merges --pretty='・%s' -n 30 "$prev..$GITHUB_SHA" > release-notes.md
+          else
+            git log --no-merges --pretty='・%s' -n 10 "$GITHUB_SHA" > release-notes.md
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: 智慧水杯 ${{ needs.prepare.outputs.version }}
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: dist/*

@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:ui' show AppExitResponse;
+import 'dart:ui' show AppExitResponse, AppExitType;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'data/intake_repository.dart';
 import 'services/care_api.dart';
@@ -11,6 +12,7 @@ import 'state/care_link_manager.dart';
 import 'state/care_sync.dart';
 import 'state/cup_connection_manager.dart';
 import 'state/intake_recorder.dart';
+import 'state/update_manager.dart';
 import 'ui/app_shell.dart';
 import 'ui/theme.dart';
 
@@ -43,10 +45,25 @@ Future<void> main() async {
   unawaited(careSync.start().catchError((Object e, StackTrace st) {
     debugPrint('[main] 照護系統同步無法啟動:$e\n$st');
   }));
+  // 自動更新:啟動時與之後每 6 小時向 GitHub Releases 查詢有沒有新版(Web 沒有)。
+  // 桌面版換成新版前要先結束 App:走和關閉視窗一樣的流程(下面的 onExitRequested),
+  // 藍牙才會斷開。準備失敗時記 log,App 照常啟動,只是沒有更新功能。
+  UpdateManager? updates;
+  try {
+    updates = await createUpdateManager(
+      exitApp: () async {
+        await ServicesBinding.instance.exitApplication(AppExitType.cancelable);
+      },
+    );
+    updates?.start();
+  } catch (e, st) {
+    debugPrint('[main] 自動更新無法啟動:$e\n$st');
+  }
   // 桌面版關閉視窗前先斷開藍牙:Linux 的 BlueZ 不會因為 App 結束就斷線,
   // 連線留著的話水杯不會再廣播,下次開 App 會找不到水杯。最多等 3 秒。
   AppLifecycleListener(
     onExitRequested: () async {
+      updates?.dispose();
       careSync.dispose();
       care.dispose();
       careApi.close();
@@ -58,7 +75,12 @@ Future<void> main() async {
     },
   );
   runApp(SmartCupApp(
-      manager: manager, repo: repo, care: care, careSync: careSync));
+    manager: manager,
+    repo: repo,
+    care: care,
+    careSync: careSync,
+    updates: updates,
+  ));
 }
 
 class SmartCupApp extends StatelessWidget {
@@ -68,12 +90,14 @@ class SmartCupApp extends StatelessWidget {
     required this.repo,
     this.care,
     this.careSync,
+    this.updates,
   });
 
   final CupConnectionManager manager;
   final IntakeRepository repo;
   final CareLinkManager? care;
   final CareSync? careSync;
+  final UpdateManager? updates;
 
   @override
   Widget build(BuildContext context) {
@@ -81,7 +105,12 @@ class SmartCupApp extends StatelessWidget {
       title: '智慧水杯',
       theme: buildAppTheme(),
       home: AppShell(
-          manager: manager, repo: repo, care: care, careSync: careSync),
+        manager: manager,
+        repo: repo,
+        care: care,
+        careSync: careSync,
+        updates: updates,
+      ),
     );
   }
 }
