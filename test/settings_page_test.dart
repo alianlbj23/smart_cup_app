@@ -92,7 +92,7 @@ void main() {
     await tester.runAsync(() => repo.ensureCup('AA:BB', 'SmartCup-1'));
     await tester.pumpAndSettle();
     expect(find.text('SmartCup-1'), findsOneWidget);
-    expect(find.text('350 mL'), findsOneWidget);
+    expect(find.text('276 mL'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('cup-AA:BB')));
     await tester.pumpAndSettle();
@@ -102,6 +102,42 @@ void main() {
 
     expect((await tester.runAsync(() => repo.cup('AA:BB')))!.capacityMl, 600);
     expect(find.text('600 mL'), findsOneWidget);
+  });
+
+  testWidgets('容量改過之後可以還原成預設值', (tester) async {
+    await tester.runAsync(() async {
+      await repo.ensureCup('AA:BB', 'SmartCup-1');
+      await repo.setCupCapacity('AA:BB', 600);
+    });
+    await pumpPage(tester);
+    expect(find.text('600 mL'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('cup-AA:BB')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ml-reset')));
+    await tester.pumpAndSettle();
+
+    expect((await tester.runAsync(() => repo.cup('AA:BB')))!.capacityMl, 276);
+    expect(find.text('276 mL'), findsOneWidget);
+    expect(find.text('SmartCup-1 的容量已還原為預設值 276 mL'), findsOneWidget);
+  });
+
+  testWidgets('容量已經是預設值時,對話框沒有「還原預設值」', (tester) async {
+    await tester.runAsync(() => repo.ensureCup('AA:BB', 'SmartCup-1'));
+    await pumpPage(tester);
+
+    await tester.tap(find.byKey(const ValueKey('cup-AA:BB')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ml-input')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ml-reset')), findsNothing);
+  });
+
+  testWidgets('每日目標的對話框沒有「還原預設值」', (tester) async {
+    await pumpPage(tester);
+    await tester.tap(find.byKey(const ValueKey('goal-tile')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ml-input')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ml-reset')), findsNothing);
   });
 
   testWidgets('從備份檔匯入:確認後合併並顯示結果', (tester) async {

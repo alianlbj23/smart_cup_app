@@ -58,7 +58,10 @@ class IntakeRepository extends ChangeNotifier {
 
   /// 單機版唯一的飲用者 id。
   static const defaultDrinkerId = 'me';
-  static const defaultCupCapacityMl = 350;
+
+  /// 水杯的預設容量(mL):目前使用的水杯直徑 80 mm、高 55 mm,
+  /// π × 40² × 55 = 276,460 mm³ ≈ 276 mL。換成不同的水杯時在「設定」修改,也可以還原成這個值。
+  static const defaultCupCapacityMl = 276;
   static const defaultDailyGoalMl = 1500;
 
   final AppDatabase _db;
@@ -184,6 +187,8 @@ class IntakeRepository extends ChangeNotifier {
       await _db.into(_db.cups).insert(CupsCompanion.insert(
             id: id,
             name: name,
+            // 明確寫入,不靠欄位的 SQL 預設值:舊版建立的資料庫,那個預設值還是 350。
+            capacityMl: const Value(defaultCupCapacityMl),
             createdAtMs: now,
             updatedAtMs: now,
           ));

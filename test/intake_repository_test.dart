@@ -29,7 +29,7 @@ void main() {
 
   test('ensureCup 第一次建立預設容量,之後只更新名稱', () async {
     final c = await repo.ensureCup('AA', 'SmartCup-1');
-    expect(c.capacityMl, 350);
+    expect(c.capacityMl, 276, reason: '直徑 80 mm、高 55 mm 的水杯');
     await repo.setCupCapacity('AA', 500);
     final c2 = await repo.ensureCup('AA', 'SmartCup-2');
     expect(c2.capacityMl, 500);

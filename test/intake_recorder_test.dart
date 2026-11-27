@@ -33,6 +33,11 @@ void main() {
     db = AppDatabase(NativeDatabase.memory());
     repo = IntakeRepository(db, clock: () => now);
     await repo.init();
+    // 這裡模擬的是 350 mL 的水杯(水位最高到 340 mL),和 App 的預設容量無關。
+    for (final d in [_cup, _other]) {
+      await repo.ensureCup(d.deviceId, d.deviceName);
+      await repo.setCupCapacity(d.deviceId, 350);
+    }
     recorder = IntakeRecorder(manager: manager, repo: repo, clock: () => now);
     recorder.start();
   });

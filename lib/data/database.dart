@@ -47,6 +47,10 @@ class Cups extends Table {
   TextColumn get name => text()();
 
   /// 滿杯容量(mL),水位比例 × 容量 = 水量。
+  ///
+  /// 這裡的 SQL 預設值(350)已經沒有在用:新水杯的容量由
+  /// `IntakeRepository.ensureCup` 明確寫入 `IntakeRepository.defaultCupCapacityMl`。
+  /// 保留原值是為了不改動已安裝裝置上的資料表定義。
   IntColumn get capacityMl => integer().withDefault(const Constant(350))();
   IntColumn get createdAtMs => integer()();
   IntColumn get updatedAtMs => integer()();
@@ -171,8 +175,10 @@ class AppDatabase extends _$AppDatabase {
   /// 1:單機版。
   /// 2:韌體事件(去重鍵、旗標、水位、容量)、照護系統同步狀態、Server 的每日目標、
   ///    水杯的 BLE 位址。
+  /// 3:只改資料、不改資料表。容量還是舊預設值 350 mL 的水杯改成 276 mL
+  ///    (目前使用的水杯:直徑 80 mm、高 55 mm)。過去的紀錄不重算。
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -194,6 +200,15 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(intakeEvents, intakeEvents.syncError);
             await m.addColumn(intakeEvents, intakeEvents.syncExcluded);
             await m.createIndex(idxIntakeFw);
+          }
+          if (from < 3) {
+            // 數字寫死:這一步是當時的決定,不跟著之後的預設值變動。分不出「沒改過」
+            // 和「刻意填 350」,一律改掉;修改時間一併更新,匯入舊備份檔才不會又改回 350。
+            await customStatement(
+              'UPDATE cups SET capacity_ml = 276, updated_at_ms = ? '
+              'WHERE capacity_ml = 350',
+              [DateTime.now().millisecondsSinceEpoch],
+            );
           }
         },
         beforeOpen: (details) async {

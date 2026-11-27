@@ -203,7 +203,11 @@ class _SettingsPageState extends State<SettingsPage> {
           const _SectionTitle('水杯容量'),
           const Padding(
             padding: EdgeInsets.only(right: 8, top: 2),
-            child: Text('水量 = 水位比例 × 容量,請設成水杯裝滿時的毫升數。', style: mutedSmall),
+            child: Text(
+              '水量 = 水位比例 × 容量。預設 ${IntakeRepository.defaultCupCapacityMl} mL'
+              '(直徑 80 mm、高 55 mm 的水杯),換成不同的水杯再修改成裝滿時的毫升數。',
+              style: mutedSmall,
+            ),
           ),
           const SizedBox(height: 4),
           if (cups == null)
@@ -253,10 +257,16 @@ class _SettingsPageState extends State<SettingsPage> {
       initial: cup.capacityMl,
       min: SettingsPage.minCapacityMl,
       max: SettingsPage.maxCapacityMl,
+      // 已經是預設值就不必顯示「還原預設值」。
+      resetTo: cup.capacityMl == IntakeRepository.defaultCupCapacityMl
+          ? null
+          : IntakeRepository.defaultCupCapacityMl,
     );
     if (ml == null || ml == cup.capacityMl) return;
     await _repo.setCupCapacity(cup.id, ml);
-    _snack('$name 的容量已改為 $ml mL');
+    _snack(ml == IntakeRepository.defaultCupCapacityMl
+        ? '$name 的容量已還原為預設值 $ml mL'
+        : '$name 的容量已改為 $ml mL');
   }
 
   // ---------------------------------------------------------------- 資料備份
@@ -438,17 +448,25 @@ class _SectionTitle extends StatelessWidget {
 }
 
 /// 輸入毫升數的對話框,限制在 [min]–[max];取消回傳 null。
+///
+/// 有傳 [resetTo] 時多一個「還原預設值」按鈕,按下直接回傳 [resetTo]。
 Future<int?> showMlInputDialog(
   BuildContext context, {
   required String title,
   required int initial,
   required int min,
   required int max,
+  int? resetTo,
 }) {
   return showDialog<int>(
     context: context,
-    builder: (_) =>
-        _MlInputDialog(title: title, initial: initial, min: min, max: max),
+    builder: (_) => _MlInputDialog(
+      title: title,
+      initial: initial,
+      min: min,
+      max: max,
+      resetTo: resetTo,
+    ),
   );
 }
 
@@ -458,12 +476,14 @@ class _MlInputDialog extends StatefulWidget {
     required this.initial,
     required this.min,
     required this.max,
+    this.resetTo,
   });
 
   final String title;
   final int initial;
   final int min;
   final int max;
+  final int? resetTo;
 
   @override
   State<_MlInputDialog> createState() => _MlInputDialogState();
@@ -490,27 +510,46 @@ class _MlInputDialogState extends State<_MlInputDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final resetTo = widget.resetTo;
+    final field = TextField(
+      key: const ValueKey('ml-input'),
+      controller: _controller,
+      autofocus: true,
+      keyboardType: TextInputType.number,
+      inputFormatters: [
+        FilteringTextInputFormatter.digitsOnly,
+        LengthLimitingTextInputFormatter(5),
+      ],
+      decoration: InputDecoration(
+        suffixText: 'mL',
+        helperText: '範圍 ${widget.min}–${widget.max} mL',
+        errorText: _error,
+      ),
+      onChanged: (_) {
+        if (_error != null) setState(() => _error = null);
+      },
+      onSubmitted: (_) => _submit(),
+    );
     return AlertDialog(
       title: Text(widget.title),
-      content: TextField(
-        key: const ValueKey('ml-input'),
-        controller: _controller,
-        autofocus: true,
-        keyboardType: TextInputType.number,
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(5),
-        ],
-        decoration: InputDecoration(
-          suffixText: 'mL',
-          helperText: '範圍 ${widget.min}–${widget.max} mL',
-          errorText: _error,
-        ),
-        onChanged: (_) {
-          if (_error != null) setState(() => _error = null);
-        },
-        onSubmitted: (_) => _submit(),
-      ),
+      content: resetTo == null
+          ? field
+          : SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  field,
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    key: const ValueKey('ml-reset'),
+                    onPressed: () => Navigator.pop(context, resetTo),
+                    icon: const Icon(Icons.restore, size: 20),
+                    label: Text('還原預設值($resetTo mL)'),
+                  ),
+                ],
+              ),
+            ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),

@@ -26,7 +26,7 @@ const _schemaV1 = [
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
-  test('schema 1 → 2:舊資料保留,新欄位為預設值,去重索引可用', () async {
+  test('schema 1 → 3:舊資料保留,新欄位為預設值,去重索引可用', () async {
     final startedAtMs = DateTime(2026, 11, 20, 8).millisecondsSinceEpoch;
     final db = AppDatabase(NativeDatabase.memory(setup: (raw) {
       for (final sql in _schemaV1) {
@@ -46,9 +46,9 @@ void main() {
     final repo = IntakeRepository(db);
     await repo.init();
 
-    expect(db.schemaVersion, 2);
+    expect(db.schemaVersion, 3);
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.data.values.single, 2);
+    expect(version.data.values.single, 3);
 
     // 舊資料原封不動。
     final cup = (await repo.cup('AA:BB'))!;
@@ -97,7 +97,89 @@ void main() {
     );
   });
 
-  test('全新安裝直接是 schema 2', () async {
+  test('舊版建立的資料庫(欄位的 SQL 預設值還是 350):新連上的水杯用新的預設容量', () async {
+    final db = AppDatabase(NativeDatabase.memory(setup: (raw) {
+      for (final sql in _schemaV1) {
+        raw.execute(sql);
+      }
+      raw.execute('PRAGMA user_version = 1');
+    }));
+    addTearDown(db.close);
+    final repo = IntakeRepository(db);
+    await repo.init();
+
+    final cup = await repo.ensureCup('CC:DD', 'SmartCup-0001');
+    expect(cup.capacityMl, 276);
+  });
+
+  group('schema 3:沒改過容量(舊預設 350 mL)的水杯改成新的預設 276 mL', () {
+    /// 開一個 schema [from] 的資料庫,裡面有 350 mL、420 mL 兩個水杯和一筆用 350 mL
+    /// 換算的喝水紀錄,再用現在的 App 打開(升級)。
+    Future<(AppDatabase, IntakeRepository)> upgradeFrom(int from) async {
+      // schema 2 和 3 的資料表一樣(3 只改資料),schema 2 的定義直接取自現在的版本。
+      final ddl = from == 1 ? _schemaV1 : await _currentSchema();
+      final db = AppDatabase(NativeDatabase.memory(setup: (raw) {
+        for (final sql in ddl) {
+          raw.execute(sql);
+        }
+        raw.execute('INSERT INTO cups (id, name, capacity_ml, created_at_ms, updated_at_ms) '
+            "VALUES ('AA:BB', 'SmartCup-E0CE', 350, 1, 2), "
+            "('CC:DD', 'SmartCup-0001', 420, 1, 2)");
+        raw.execute("INSERT INTO drinkers (id, name, updated_at_ms) VALUES ('me', '我', 3)");
+        raw.execute(
+          'INSERT INTO intake_events (id, drinker_id, cup_id, kind, ml, started_at_ms, '
+          'tz_offset_min, local_day, before_ml, after_ml, source, status, updated_at_ms) '
+          "VALUES ('e1', 'me', 'AA:BB', 'drink', 120, 1000, 480, '2026-11-20', "
+          "300, 180, 'appAuto', 'ok', 9)",
+        );
+        raw.execute('PRAGMA user_version = $from');
+      }));
+      addTearDown(db.close);
+      final repo = IntakeRepository(db);
+      await repo.init();
+      return (db, repo);
+    }
+
+    for (final from in [1, 2]) {
+      test('從 schema $from 升級:350 → 276,改過的容量和過去的紀錄不動', () async {
+        final (db, repo) = await upgradeFrom(from);
+        final version = await db.customSelect('PRAGMA user_version').getSingle();
+        expect(version.data.values.single, 3);
+
+        final untouched = (await repo.cup('AA:BB'))!;
+        expect(untouched.capacityMl, 276);
+        expect(untouched.name, 'SmartCup-E0CE');
+        expect(untouched.updatedAtMs, greaterThan(2),
+            reason: '修改時間更新成升級當下:比舊的備份檔新,匯入備份不會又被改回 350');
+
+        final customized = (await repo.cup('CC:DD'))!;
+        expect((customized.capacityMl, customized.updatedAtMs), (420, 2));
+
+        final e = (await repo.allEvents()).single;
+        expect((e.ml, e.beforeMl, e.afterMl, e.updatedAtMs), (120, 300, 180, 9));
+      });
+    }
+
+    test('已經是 schema 3:使用者自己設成 350 mL 的水杯不會再被改掉', () async {
+      final ddl = await _currentSchema();
+      final db = AppDatabase(NativeDatabase.memory(setup: (raw) {
+        for (final sql in ddl) {
+          raw.execute(sql);
+        }
+        raw.execute('INSERT INTO cups (id, name, capacity_ml, created_at_ms, updated_at_ms) '
+            "VALUES ('AA:BB', 'SmartCup-E0CE', 350, 1, 2)");
+        raw.execute('PRAGMA user_version = 3');
+      }));
+      addTearDown(db.close);
+      final repo = IntakeRepository(db);
+      await repo.init();
+
+      final cup = (await repo.cup('AA:BB'))!;
+      expect((cup.capacityMl, cup.updatedAtMs), (350, 2));
+    });
+  });
+
+  test('全新安裝直接是 schema 3', () async {
     final db = AppDatabase(NativeDatabase.memory());
     addTearDown(db.close);
     final repo = IntakeRepository(db);
@@ -106,5 +188,17 @@ void main() {
         .customSelect("SELECT name FROM sqlite_master WHERE type = 'index'")
         .get();
     expect(indexes.map((r) => r.read<String>('name')), contains('idx_intake_fw'));
+    final version = await db.customSelect('PRAGMA user_version').getSingle();
+    expect(version.data.values.single, 3);
   });
+}
+
+/// 現在這一版 App 全新安裝時建立的資料表與索引。
+Future<List<String>> _currentSchema() async {
+  final db = AppDatabase(NativeDatabase.memory());
+  final rows = await db
+      .customSelect('SELECT sql FROM sqlite_master WHERE sql IS NOT NULL')
+      .get();
+  await db.close();
+  return [for (final r in rows) r.read<String>('sql')];
 }

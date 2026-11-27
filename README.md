@@ -62,7 +62,7 @@ flutter run                # 手機用 USB 接上電腦（Android 要開啟 USB 
 
 ### 喝水怎麼記錄
 
-韌體只有「水位比例」，沒有 mL 的概念；App 用 **水量 = 水位比例 × 水杯容量** 換算 mL（容量在「設定」改，預設 350 mL，存在 `cups.capacity_ml`）。事件由誰偵測看韌體版本（[lib/state/intake_recorder.dart](lib/state/intake_recorder.dart)）：
+韌體只有「水位比例」，沒有 mL 的概念；App 用 **水量 = 水位比例 × 水杯容量** 換算 mL（容量預設 276 mL：目前使用的水杯直徑 80 mm、高 55 mm，π × 40² × 55 ≈ 276 mL；在「設定」可以修改，也可以還原成預設值，存在 `cups.capacity_ml`）。事件由誰偵測看韌體版本（[lib/state/intake_recorder.dart](lib/state/intake_recorder.dart)）：
 
 **韌體 ≥ 0.3.0：由韌體偵測（DRINK_EVENT `0x07`）**。App 關掉自己的偵測，否則同一口水會算兩次。
 
@@ -103,7 +103,7 @@ flutter run                # 手機用 USB 接上電腦（Android 要開啟 USB 
 - **解除安裝 App 會刪掉本機所有紀錄**，請定期在「設定 → 資料備份」匯出：
   - **匯出紀錄（CSV）**：可以用 Excel／Google 試算表打開。
   - **匯出備份檔**（JSON）／**從備份檔匯入**：換手機用。匯入是合併，不會刪掉現有紀錄，重複匯入同一個檔案不會重複；每日目標會改成備份檔裡的值（已連結照護系統時不會改）。匯入的紀錄不會上傳到照護系統。1.0.0 匯出的備份檔可以直接匯入。
-- 資料表（`schemaVersion` 2）：
+- 資料表（`schemaVersion` 3；3 沒有改資料表，只在升級時把容量還是舊預設值 350 mL 的水杯改成 276 mL，過去的紀錄不重算）：
   - `cups`：水杯、容量、水杯自己回報的 BLE 位址（`ble_address`，韌體 0.4.0 起）。
   - `drinkers`：飲用者（一台裝置只有一位）、每日目標；`goal_from_server`／`server_goal_ml` 記錄目標是不是由照護系統設定（`server_goal_ml` 為 null = 照護系統尚未設定）。
   - `intake_events`：每次喝水／加水／倒掉。UUID 主鍵（上傳時就是 `client_event_id`）、UTC 毫秒時間＋當地日期 `local_day`、軟刪除。韌體事件另外有 `fw_key`（去重）、`fw_seq`、`saw_drinking`、`too_long`、`time_estimated`、事件前後的水位 %、當下的容量。同步狀態：`synced_at_ms`（上傳成功的時間，null = 還沒同步）、`sync_error`（被照護系統拒收的原因）、`sync_excluded`（不上傳）。

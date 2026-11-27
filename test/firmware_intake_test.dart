@@ -55,6 +55,8 @@ void main() {
     FirmwareVersion? firmware = const FirmwareVersion(0, 3, 0),
     String? bleAddress,
     IntakeRepository Function(AppDatabase db)? makeRepo,
+    // 大部分測試模擬的是 350 mL 的水杯;null = 第一次連上、沒設定過容量的水杯。
+    int? capacityMl = 350,
   }) async {
     SharedPreferences.setMockInitialValues({});
     now = DateTime(2026, 11, 23, 9);
@@ -66,6 +68,10 @@ void main() {
     db = AppDatabase(NativeDatabase.memory());
     repo = makeRepo?.call(db) ?? IntakeRepository(db, clock: () => now);
     await repo.init();
+    if (capacityMl != null) {
+      await repo.ensureCup(_cup.deviceId, _cup.deviceName);
+      await repo.setCupCapacity(_cup.deviceId, capacityMl);
+    }
     recorder = IntakeRecorder(manager: manager, repo: repo, clock: () => now);
     recorder.start();
   }
@@ -179,6 +185,17 @@ void main() {
       expect(e.status, IntakeStatus.ok);
       expect(e.ml, 280, reason: '|10 − 90| / 100 × 350');
       expect((await repo.dailyTotals(day, day))[day], 0);
+      expect(ble.drinkAcks, [12]);
+    });
+
+    test('第一次連上的水杯(沒設定過容量):用預設容量 276 mL 換算', () async {
+      await boot(capacityMl: null);
+      await connect();
+      await push(event());
+
+      final e = (await events()).single;
+      expect(e.ml, 18, reason: '|62.0 − 55.5| / 100 × 276 = 17.94 → 四捨五入');
+      expect(e.capacityMl, 276);
       expect(ble.drinkAcks, [12]);
     });
 
