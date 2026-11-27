@@ -559,7 +559,8 @@ void main() {
 
     appTest('從沒看過水杯:cup_last_seen_at、firmware、電量、水位都是 null', (t) async {
       await startSync(t);
-      expect(server.statuses.single, {
+      // day_totals 另有一組測試(「每日總量」)。
+      expect(Map.of(server.statuses.single)..remove('day_totals'), {
         'cup_connected': false,
         'cup_last_seen_at': null,
         'battery_pct': null,
@@ -603,6 +604,161 @@ void main() {
       expect(care.isLinked, isFalse);
       expect(care.notice, contains('失效'));
       expect(care.notice, contains('本機紀錄仍保留'));
+    });
+  });
+
+  group('每日總量(網站的喝水量以 App 為準)', () {
+    List<Map<String, dynamic>> totalsOf(Map<String, dynamic> body) => [
+          for (final d in body['day_totals'] as List)
+            (d as Map).cast<String, dynamic>(),
+        ];
+    Map<String, dynamic> eventsBody(int index) =>
+        (jsonDecode(server.requestsTo('/cup/events/')[index].body) as Map)
+            .cast<String, dynamic>();
+    String dayBefore(int days) {
+      final today = startOfDay(now());
+      return dayKey(DateTime(today.year, today.month, today.day - days));
+    }
+
+    appTest('上傳紀錄時帶「今天＋前 6 天」的總量,數字和統計頁相同', (t) async {
+      await add(ml: 100);
+      await add(cupId: null, ml: 250);
+      await t.pump(const Duration(seconds: 1)); // 同一個水杯同一毫秒只能有一筆
+      await repo.addEvent(
+          kind: IntakeKind.refill,
+          ml: 300,
+          startedAt: now(),
+          cupId: 'AA:BB',
+          source: IntakeSource.appAuto);
+      await startSync(t);
+
+      final totals = totalsOf(eventsBody(0));
+      expect([for (final d in totals) d['date']],
+          [for (var i = 6; i >= 0; i--) dayBefore(i)]);
+      expect(totals.last,
+          {'date': dayBefore(0), 'total_ml': 350, 'drink_count': 2});
+      expect(totals.first,
+          {'date': dayBefore(6), 'total_ml': 0, 'drink_count': 0});
+      final today = startOfDay(now());
+      expect(totals.last['total_ml'], (await repo.dailyTotals(today, today))[today]);
+    });
+
+    appTest('狀態回報也帶每日總量', (t) async {
+      await add(ml: 180);
+      await startSync(t);
+      expect(totalsOf(server.statuses.first), hasLength(7));
+      expect(totalsOf(server.statuses.first).last,
+          {'date': dayBefore(0), 'total_ml': 180, 'drink_count': 1});
+    });
+
+    appTest('連結之前的紀錄(不上傳、統計頁也不算)不算進總量', (t) async {
+      await add(ml: 500);
+      await repo.excludeAllFromSync();
+      await t.pump(const Duration(seconds: 1));
+      await add(ml: 120);
+      await startSync(t);
+      expect(totalsOf(server.statuses.first).last,
+          {'date': dayBefore(0), 'total_ml': 120, 'drink_count': 1});
+    });
+
+    appTest('總量變了但沒有紀錄要上傳(別的水杯的紀錄):補送一次狀態回報,之後不重複送',
+        (t) async {
+      await startSync(t);
+      final before = server.statuses.length;
+      await add(cupId: 'CC:DD', ml: 80); // 統計會算,但不會上傳
+      await afterDebounce(t);
+      expect(uploads(), 0);
+      expect(server.statuses, hasLength(before + 1));
+      expect(totalsOf(server.statuses.last).last['total_ml'], 80);
+
+      await t.pump(CareSync.defaultDebounce * 3);
+      await sync.settled();
+      expect(server.statuses, hasLength(before + 1));
+    });
+
+    appTest('有紀錄上傳時總量跟著那一批送出,不另外多送狀態回報', (t) async {
+      await startSync(t);
+      final before = server.statuses.length;
+      await add(ml: 60);
+      await afterDebounce(t);
+      expect(uploads(), 1);
+      expect(totalsOf(eventsBody(0)).last['total_ml'], 60);
+      expect(server.statuses, hasLength(before));
+    });
+
+    appTest('Server 不接受 day_totals(422 INVALID_DAY_TOTALS):不帶總量重送,'
+        '紀錄照常上傳,並讓使用者知道', (t) async {
+      server.rejectDayTotals = true;
+      final a = await add();
+      await startSync(t);
+
+      expect(await pendingCount(), 0);
+      expect((await repo.event(a.id))!.syncError, isNull);
+      expect(server.uploaded.map((e) => e['client_event_id']), [a.id]);
+      // 第一次回報帶總量被拒收,重送的那一次與之後的請求都不帶。
+      expect(server.statuses.first.containsKey('day_totals'), isTrue);
+      expect(server.statuses.last.containsKey('day_totals'), isFalse);
+      expect(eventsBody(uploads() - 1).containsKey('day_totals'), isFalse);
+      expect(sync.dayTotalsRejected, isTrue);
+      expect(sync.lastError, contains('每日總量'));
+
+      // 同樣的內容不再重送;內容變了才再試一次(仍被拒收:帶總量一次、不帶總量一次)。
+      final statuses = server.statuses.length;
+      await t.pump(const Duration(minutes: 5));
+      await sync.settled();
+      expect(server.statuses.last.containsKey('day_totals'), isFalse);
+      final afterHeartbeat = server.statuses.length;
+      expect(afterHeartbeat, statuses + 1, reason: '同樣的總量不再試');
+
+      await add(cupId: 'CC:DD', ml: 80);
+      await afterDebounce(t);
+      expect(server.statuses, hasLength(afterHeartbeat + 2));
+      expect(server.statuses[afterHeartbeat].containsKey('day_totals'), isTrue);
+      expect(server.statuses.last.containsKey('day_totals'), isFalse);
+      await t.pump(CareSync.defaultDebounce * 3);
+      await sync.settled();
+      expect(server.statuses, hasLength(afterHeartbeat + 2), reason: '不會一直重試');
+    });
+
+    appTest('被拒收之後 Server 恢復接受:總量變動時重新送出,錯誤訊息消失', (t) async {
+      server.rejectDayTotals = true;
+      await startSync(t);
+      expect(sync.dayTotalsRejected, isTrue);
+
+      server.rejectDayTotals = false;
+      await add(ml: 90);
+      await afterDebounce(t);
+      expect(totalsOf(eventsBody(uploads() - 1)).last['total_ml'], 90);
+      expect(sync.dayTotalsRejected, isFalse);
+      expect(sync.lastError, isNull);
+    });
+
+    appTest('某一天超過合約的上限(100000 mL):那一天不送,其他天照送,不會整批被拒收', (t) async {
+      await repo.addEvent(
+          kind: IntakeKind.drink,
+          ml: 100001,
+          startedAt: now(),
+          cupId: 'CC:DD',
+          source: IntakeSource.appAuto);
+      await startSync(t);
+      final totals = totalsOf(server.statuses.first);
+      expect([for (final d in totals) d['date']],
+          [for (var i = 6; i >= 1; i--) dayBefore(i)]);
+      expect(sync.dayTotalsRejected, isFalse);
+    });
+
+    appTest('連不上 Server 時沒送出去的總量,恢復後會補送', (t) async {
+      await startSync(t);
+      server.onStatus = (_) => http.Response('Bad Gateway', 502);
+      await add(cupId: 'CC:DD', ml: 80);
+      await afterDebounce(t);
+      final failed = server.statuses.length;
+
+      server.onStatus = null;
+      await t.pump(const Duration(minutes: 5));
+      await sync.settled();
+      expect(server.statuses.length, greaterThan(failed));
+      expect(totalsOf(server.statuses.last).last['total_ml'], 80);
     });
   });
 

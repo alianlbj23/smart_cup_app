@@ -8,7 +8,7 @@ void main() {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final version =
         RegExp(r'^version:\s*(\S+)$', multiLine: true).firstMatch(pubspec)![1]!;
-    expect(version, '1.1.3+5');
+    expect(version, '1.1.4+6');
     expect(appVersion, version.split('+').first);
   });
 }

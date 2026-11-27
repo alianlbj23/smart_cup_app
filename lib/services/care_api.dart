@@ -214,6 +214,40 @@ class CareMe {
   final DateTime? serverTime;
 }
 
+/// App 統計頁上某一天的喝水量(`day_totals` 的一筆)。照護系統的網站直接顯示這個數字,
+/// 所以 App 和網站不會對不上;逐筆紀錄照常上傳,當明細用。
+class CareDayTotal {
+  CareDayTotal({
+    required this.day,
+    required this.totalMl,
+    required this.drinkCount,
+  }) {
+    if (totalMl < 0) {
+      throw ArgumentError.value(totalMl, 'totalMl', '不可以是負數');
+    }
+    if (drinkCount < 0) {
+      throw ArgumentError.value(drinkCount, 'drinkCount', '不可以是負數');
+    }
+  }
+
+  /// 當地日期(只用年月日)。
+  final DateTime day;
+
+  /// 那一天的喝水量(mL)。
+  final int totalMl;
+
+  /// 計入的喝水筆數。
+  final int drinkCount;
+
+  Map<String, Object?> toJson() => {
+        'date': '${day.year.toString().padLeft(4, '0')}-'
+            '${day.month.toString().padLeft(2, '0')}-'
+            '${day.day.toString().padLeft(2, '0')}',
+        'total_ml': totalMl,
+        'drink_count': drinkCount,
+      };
+}
+
 /// `POST cup/status/` 的內容。
 class CareStatusReport {
   const CareStatusReport({
@@ -223,6 +257,7 @@ class CareStatusReport {
     required this.firmware,
     required this.pendingEvents,
     required this.levelPct,
+    this.dayTotals,
   });
 
   final bool cupConnected;
@@ -240,6 +275,9 @@ class CareStatusReport {
   /// 目前水位 %(0–100)。
   final double? levelPct;
 
+  /// App 統計頁上最近幾天的喝水量;null 時不送這個欄位。
+  final List<CareDayTotal>? dayTotals;
+
   Map<String, Object?> toJson() => {
         'cup_connected': cupConnected,
         'cup_last_seen_at': _unixSeconds(cupLastSeenAt),
@@ -247,6 +285,8 @@ class CareStatusReport {
         'firmware': firmware,
         'pending_events': pendingEvents,
         'level_pct': levelPct,
+        if (dayTotals != null)
+          'day_totals': [for (final d in dayTotals!) d.toJson()],
       };
 }
 
@@ -456,18 +496,23 @@ class CareApi {
   }
 
   /// 上傳事件([careEventPayload] 的結果),一次最多 [maxEventsPerRequest] 筆。
+  /// [dayTotals] 是 App 統計頁上最近幾天的喝水量,一起送出;null 時不送。
   Future<List<CareEventResult>> uploadEvents(
     Uri base,
     String token,
-    List<Map<String, Object?>> events,
-  ) async {
+    List<Map<String, Object?>> events, {
+    List<CareDayTotal>? dayTotals,
+  }) async {
     if (events.length > maxEventsPerRequest) {
       throw ArgumentError.value(
           events.length, 'events', '一次最多 $maxEventsPerRequest 筆');
     }
     const path = '$_cup/events/';
-    final data =
-        await _send('POST', base, path, token: token, body: {'events': events});
+    final data = await _send('POST', base, path, token: token, body: {
+      'events': events,
+      if (dayTotals != null)
+        'day_totals': [for (final d in dayTotals) d.toJson()],
+    });
     return _parse(path, () {
       final list = data['results'];
       if (list is! List) throw const FormatException('results 不是陣列');

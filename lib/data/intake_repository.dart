@@ -387,10 +387,20 @@ class IntakeRepository extends ChangeNotifier {
 
   /// 每日飲水量(只算 [IntakeEventX.countsAsIntake]),key 為當地日期 00:00。
   /// 區間內沒有喝水的日子也會出現,值為 0。
-  Future<Map<DateTime, int>> dailyTotals(DateTime fromDay, DateTime toDay) async {
+  Future<Map<DateTime, int>> dailyTotals(DateTime fromDay, DateTime toDay) async =>
+      {
+        for (final e in (await dailyIntake(fromDay, toDay)).entries)
+          e.key: e.value.ml,
+      };
+
+  /// 每日的飲水量與計入的筆數,key 為當地日期 00:00;沒有喝水的日子是 (0, 0)。
+  /// 統計頁與上傳給照護系統的每日總量都用這個,兩邊才會是同一個數字。
+  Future<Map<DateTime, ({int ml, int count})>> dailyIntake(
+      DateTime fromDay, DateTime toDay) async {
     final total = _db.intakeEvents.ml.sum();
+    final count = _db.intakeEvents.id.count();
     final rows = await (_db.selectOnly(_db.intakeEvents)
-          ..addColumns([_db.intakeEvents.localDay, total])
+          ..addColumns([_db.intakeEvents.localDay, total, count])
           ..where(_db.intakeEvents.drinkerId.equals(defaultDrinkerId) &
               _db.intakeEvents.kind.equalsValue(IntakeKind.drink) &
               _db.intakeEvents.status.equalsValue(IntakeStatus.ok) &
@@ -401,13 +411,14 @@ class IntakeRepository extends ChangeNotifier {
         .get();
     final byKey = {
       for (final r in rows)
-        r.read(_db.intakeEvents.localDay)!: r.read(total) ?? 0,
+        r.read(_db.intakeEvents.localDay)!:
+            (ml: r.read(total) ?? 0, count: r.read(count) ?? 0),
     };
-    final result = <DateTime, int>{};
+    final result = <DateTime, ({int ml, int count})>{};
     for (var d = startOfDay(fromDay);
         !d.isAfter(startOfDay(toDay));
         d = DateTime(d.year, d.month, d.day + 1)) {
-      result[d] = byKey[dayKey(d)] ?? 0;
+      result[d] = byKey[dayKey(d)] ?? (ml: 0, count: 0);
     }
     return result;
   }

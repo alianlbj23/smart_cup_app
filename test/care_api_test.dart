@@ -449,6 +449,54 @@ void main() {
       );
     });
 
+    test('cup/events/ 與 cup/status/:有每日總量時放在 day_totals,沒有就不帶這個欄位', () async {
+      final totals = [
+        CareDayTotal(day: DateTime(2026, 11, 26), totalMl: 4293, drinkCount: 26),
+        CareDayTotal(day: DateTime(2026, 11, 27), totalMl: 362, drinkCount: 4),
+      ];
+      const wire = [
+        {'date': '2026-11-26', 'total_ml': 4293, 'drink_count': 26},
+        {'date': '2026-11-27', 'total_ml': 362, 'drink_count': 4},
+      ];
+      final a = api((_) => _ok({'results': <Object>[]}));
+      await a.uploadEvents(_base, token, [], dayTotals: totals);
+      await a.uploadEvents(_base, token, []);
+      expect(jsonDecode(requests[0].body), {'events': <Object>[], 'day_totals': wire});
+      expect(jsonDecode(requests[1].body), {'events': <Object>[]});
+
+      const report = CareStatusReport(
+          cupConnected: false,
+          cupLastSeenAt: null,
+          batteryPct: null,
+          firmware: null,
+          pendingEvents: 0,
+          levelPct: null);
+      expect(report.toJson().containsKey('day_totals'), isFalse);
+      expect(
+          CareStatusReport(
+            cupConnected: false,
+            cupLastSeenAt: null,
+            batteryPct: null,
+            firmware: null,
+            pendingEvents: 0,
+            levelPct: null,
+            dayTotals: totals,
+          ).toJson()['day_totals'],
+          wire);
+    });
+
+    test('每日總量的日期一律補零成 YYYY-MM-DD', () {
+      expect(CareDayTotal(day: DateTime(2026, 1, 5, 23, 59), totalMl: 0, drinkCount: 0).toJson(),
+          {'date': '2026-01-05', 'total_ml': 0, 'drink_count': 0});
+    });
+
+    test('每日總量不可以是負數', () {
+      expect(() => CareDayTotal(day: DateTime(2026, 11, 27), totalMl: -1, drinkCount: 0),
+          throwsArgumentError);
+      expect(() => CareDayTotal(day: DateTime(2026, 11, 27), totalMl: 0, drinkCount: -1),
+          throwsArgumentError);
+    });
+
     test('cup/status/:送出狀態,回傳 Server 的目標', () async {
       final reply = await api((_) => _ok({
             'server_time': 1795600000,

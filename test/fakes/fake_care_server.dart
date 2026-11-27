@@ -57,6 +57,12 @@ class FakeCareServer {
   /// 收到的 `cup/status/` 內容。
   final List<Map<String, dynamic>> statuses = [];
 
+  /// true = 請求帶 `day_totals` 就回 422 `INVALID_DAY_TOTALS`(整個請求都不收)。
+  bool rejectDayTotals = false;
+
+  static final http.Response _badDayTotals = fail(422, 'INVALID_DAY_TOTALS',
+      message: 'day_totals 第 1 筆 date 須為 YYYY-MM-DD', retryable: false);
+
   http.Client get client => MockClient(_handle);
 
   /// 路徑結尾是 [suffix] 的請求。
@@ -136,6 +142,9 @@ class FakeCareServer {
           }));
     }
     if (path.endsWith('/cup/events/')) {
+      if (rejectDayTotals && (jsonDecode(r.body) as Map)['day_totals'] != null) {
+        return _badDayTotals;
+      }
       final events = [
         for (final e in (jsonDecode(r.body) as Map)['events'] as List)
           (e as Map).cast<String, dynamic>(),
@@ -151,6 +160,9 @@ class FakeCareServer {
     }
     if (path.endsWith('/cup/status/')) {
       statuses.add((jsonDecode(r.body) as Map).cast<String, dynamic>());
+      if (rejectDayTotals && statuses.last['day_totals'] != null) {
+        return _badDayTotals;
+      }
       return await (onStatus?.call(r) ??
           ok({
             'server_time': 1795600000,

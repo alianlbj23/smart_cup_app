@@ -39,6 +39,33 @@ void main() {
 
   tearDown(() => db.close());
 
+  test('dailyIntake:每天的喝水量與筆數,和 dailyTotals 是同一個數字', () async {
+    await repo.addEvent(
+        kind: IntakeKind.refill,
+        ml: 300,
+        startedAt: DateTime(2026, 11, 26, 16),
+        source: IntakeSource.appAuto);
+    await repo.addEvent(
+        kind: IntakeKind.drink,
+        ml: 999,
+        startedAt: DateTime(2026, 11, 26, 17),
+        source: IntakeSource.appAuto,
+        status: IntakeStatus.uncertain);
+    final from = DateTime(2026, 11, 24);
+    final to = DateTime(2026, 11, 26);
+    final intake = await repo.dailyIntake(from, to);
+    expect({for (final e in intake.entries) dayKey(e.key): (e.value.ml, e.value.count)}, {
+      '2026-11-24': (0, 0),
+      '2026-11-25': (300, 1),
+      '2026-11-26': (6266, 2),
+    });
+    final totals = await repo.dailyTotals(from, to);
+    expect({for (final e in intake.entries) e.key: e.value.ml}, totals);
+
+    await link(); // 連結之後,原有的紀錄不算
+    expect((await repo.dailyIntake(to, to))[to], (ml: 0, count: 0));
+  });
+
   group('IntakeRepository', () {
     test('還沒連結:所有紀錄都算', () async {
       expect(repo.linkedToCare, isFalse);

@@ -97,6 +97,26 @@ class CareSync extends ChangeNotifier {
   DateTime? _lastSyncedAt;
   String? _lastError;
 
+  /// 每日總量一次送幾天(今天＋前 6 天,和合約一致)。
+  static const dayTotalDays = 7;
+
+  /// 合約的上限:超過的那一天 Server 會連同整個請求一起拒收,所以 App 先不送那一天。
+  static const maxDayTotalMl = 100000;
+  static const maxDayDrinkCount = 10000;
+
+  static const _invalidDayTotals = 'INVALID_DAY_TOTALS';
+  static const _dayTotalsRejectedMessage =
+      '照護系統沒有收下每日總量,網站上的喝水量可能和 App 不同';
+
+  /// 最後一次成功送出的每日總量(用來判斷之後有沒有變)。
+  String? _sentDayTotals;
+
+  /// Server 拒收的那一份每日總量。內容沒變就不再送(紀錄與狀態照常送),變了再試一次。
+  String? _rejectedDayTotals;
+
+  /// Server 是否拒收了目前的每日總量(網站的數字可能和 App 不同,畫面要讓使用者知道)。
+  bool get dayTotalsRejected => _rejectedDayTotals != null;
+
   /// 進行中的工作,測試可等待。
   final Set<Future<void>> _inFlight = {};
 
@@ -164,6 +184,9 @@ class CareSync extends ChangeNotifier {
     _lastSyncedAt = null;
     _pendingCount = 0;
     _rejectedCount = 0;
+    // 換了連結(可能是另一位住民、另一台 Server):每日總量重新送,也重新試一次。
+    _sentDayTotals = null;
+    _rejectedDayTotals = null;
     // 換了連結:上一個連結記下的水杯狀態不沿用。
     _cupLastSeenAtMs = null;
     _cupFirmware = null;
@@ -197,6 +220,68 @@ class CareSync extends ChangeNotifier {
     return link != null &&
         _cups.state == CupConnectionState.ready &&
         _cups.activeDeviceId == link.cupLocalId;
+  }
+
+  // ---------------------------------------------------------------- 每日總量
+
+  /// 統計頁上「今天＋前 6 天」的喝水量:照護系統的網站直接顯示這些數字。
+  Future<List<CareDayTotal>> _dayTotals() async {
+    final today = startOfDay(_clock());
+    final from =
+        DateTime(today.year, today.month, today.day - (dayTotalDays - 1));
+    final intake = await _repo.dailyIntake(from, today);
+    final totals = <CareDayTotal>[];
+    for (final e in intake.entries) {
+      if (e.value.ml > maxDayTotalMl || e.value.count > maxDayDrinkCount) {
+        debugPrint('[CareSync] ${dayKey(e.key)} 的喝水量超過照護系統的上限'
+            '(${e.value.ml} mL、${e.value.count} 筆),這一天的總量不送');
+        continue;
+      }
+      totals.add(CareDayTotal(
+          day: e.key, totalMl: e.value.ml, drinkCount: e.value.count));
+    }
+    return totals;
+  }
+
+  static String _dayTotalsKey(List<CareDayTotal> totals) =>
+      [for (final d in totals) d.toJson()].toString();
+
+  /// 帶著每日總量送出 [send]。Server 說總量的格式不對(422 INVALID_DAY_TOTALS)時記下來,
+  /// 不帶總量再送一次:不能因為總量而卡住紀錄上傳與狀態回報。
+  Future<T> _withDayTotals<T>(
+      Future<T> Function(List<CareDayTotal>? totals) send) async {
+    final token = _link.link?.token;
+    final totals = await _dayTotals();
+    final key = _dayTotalsKey(totals);
+    if (key == _rejectedDayTotals) return send(null);
+    // 等回應的期間換了連結的話,這個回應不可以記到新的連結上。
+    bool sameLink() => _link.link?.token == token;
+    try {
+      final result = await send(totals);
+      if (sameLink()) {
+        _sentDayTotals = key;
+        _rejectedDayTotals = null;
+      }
+      return result;
+    } on CareApiException catch (e) {
+      if (e.code != _invalidDayTotals) rethrow;
+      debugPrint('[CareSync] 照護系統拒收每日總量(${e.message}),內容改變前不再送');
+      if (sameLink()) {
+        _rejectedDayTotals = key;
+        _lastError = _dayTotalsRejectedMessage;
+        notifyListeners();
+      }
+      return send(null);
+    }
+  }
+
+  /// 總量和上次送出的不同、而且沒有紀錄會把它帶上去時(例如改到一筆不上傳的紀錄),
+  /// 補送一次狀態回報。
+  Future<void> _reportDayTotalsIfChanged() async {
+    if (_link.link == null || _disposed) return;
+    final key = _dayTotalsKey(await _dayTotals());
+    if (key == _sentDayTotals || key == _rejectedDayTotals) return;
+    await reportStatus();
   }
 
   Future<void> _tick({bool refreshMe = false}) async {
@@ -281,19 +366,25 @@ class CareSync extends ChangeNotifier {
     }
     final water = connected ? _cups.latestWater : null;
     final seenAt = _cupLastSeenAtMs;
-    final report = CareStatusReport(
-      cupConnected: connected,
-      cupLastSeenAt:
-          seenAt == null ? null : DateTime.fromMillisecondsSinceEpoch(seenAt),
-      batteryPct: status?.batteryPercent,
-      firmware: _cupFirmware,
-      pendingEvents: await _repo.pendingSyncCount(cupId: link.cupLocalId),
-      // 一位小數就夠(韌體的解析度是 0.5%)。
-      levelPct: water == null ? null : (water.fillPercent * 10).round() / 10,
-    );
+    final pendingEvents = await _repo.pendingSyncCount(cupId: link.cupLocalId);
     try {
-      final reply =
-          await _api.postStatus(Uri.parse(link.serverUrl), link.token, report);
+      final reply = await _withDayTotals((totals) => _api.postStatus(
+            Uri.parse(link.serverUrl),
+            link.token,
+            CareStatusReport(
+              cupConnected: connected,
+              cupLastSeenAt: seenAt == null
+                  ? null
+                  : DateTime.fromMillisecondsSinceEpoch(seenAt),
+              batteryPct: status?.batteryPercent,
+              firmware: _cupFirmware,
+              pendingEvents: pendingEvents,
+              // 一位小數就夠(韌體的解析度是 0.5%)。
+              levelPct:
+                  water == null ? null : (water.fillPercent * 10).round() / 10,
+              dayTotals: totals,
+            ),
+          ));
       // 回應裡的住民資料讓一直開著的 App 也跟得上換房、換床(舊版 Server 沒有就不動)。
       await _link.applyServerInfo(link.token,
           goal: reply.goal, resident: reply.resident);
@@ -333,8 +424,9 @@ class CareSync extends ChangeNotifier {
             cupId: link.cupLocalId, limit: batchSize);
         if (batch.isEmpty) {
           _retryAttempt = 0;
-          _lastError = null;
+          _lastError = dayTotalsRejected ? _dayTotalsRejectedMessage : null;
           _lastSyncedAt = _clock();
+          await _reportDayTotalsIfChanged();
           break;
         }
         if (await _uploadBatch(link, batch) == 0) {
@@ -358,11 +450,12 @@ class CareSync extends ChangeNotifier {
   /// 整批失敗而且不是紀錄本身的問題時丟出 [CareApiException]。
   Future<int> _uploadBatch(CareLink link, List<IntakeEvent> batch) async {
     try {
-      final results = await _api.uploadEvents(
-        Uri.parse(link.serverUrl),
-        link.token,
-        [for (final e in batch) careEventPayload(e)],
-      );
+      final results = await _withDayTotals((totals) => _api.uploadEvents(
+            Uri.parse(link.serverUrl),
+            link.token,
+            [for (final e in batch) careEventPayload(e)],
+            dayTotals: totals,
+          ));
       final accepted = {for (final r in results) r.clientEventId};
       final versions = [
         for (final e in batch)
